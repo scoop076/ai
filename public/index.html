@@ -380,6 +380,7 @@ body.no-captions .captions { visibility: hidden; }
     if (!haveClaude()) { setState("needkey"); sheet.hidden = false; claudeEl.textContent = "Hello, Jim. Add your Claude API key in settings to wake me up."; return; }
     if (!canListen) { setState("nomic"); return; }
     setState("idle");
+    resumeAfterReload();
   }
 
   /* ---------- voices ---------- */
@@ -461,8 +462,9 @@ body.no-captions .captions { visibility: hidden; }
       };
       rec.onerror = (ev) => {
         if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
-          sessionUntil = 0;
           setState("idle");
+          if (!fromGesture) { showNote("I'm updated. Tap my face to keep talking.", 10000); return; }
+          sessionUntil = 0;
           showNote("The microphone or speech recognition is blocked. On the iPad, allow both under Settings → Apps → Safari.", 8000);
         }
       };
@@ -940,6 +942,28 @@ body.no-captions .captions { visibility: hidden; }
     for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
     return h + ":" + t.length;
   }
+  function saveResume() {
+    const until = settings.stay ? Math.max(sessionUntil, Date.now() + settings.stay * 60000) : 0;
+    try { sessionStorage.setItem("frame.resume", JSON.stringify({ until })); } catch {}
+  }
+  // After an update reload: pick the conversation back up without a tap when
+  // the browser allows it (Safari: Microphone and Auto-Play set to Allow).
+  async function resumeAfterReload() {
+    let r = null;
+    try { r = JSON.parse(sessionStorage.getItem("frame.resume") || "null"); sessionStorage.removeItem("frame.resume"); } catch {}
+    if (!r || !r.until || r.until < Date.now() || !canListen || !haveClaude()) return;
+    sessionUntil = r.until;
+    // Can we make sound without a tap?
+    let soundOk = false;
+    if (haveEleven() && ensureAudio()) {
+      try { await Promise.race([actx.resume(), new Promise((res) => setTimeout(res, 800))]); } catch {}
+      soundOk = actx.state === "running";
+    }
+    if (soundOk) unlocked = true;
+    if (pendingAnnounce && soundOk) { if (tryAnnounce()) return; }   // speaks, then listens again
+    setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 600);
+  }
+
   async function currentVersion() {
     try { const r = await fetch("/api/version", { cache: "no-store" }); const j = await r.json(); return j.id || null; }
     catch { return null; }
@@ -962,9 +986,18 @@ body.no-captions .captions { visibility: hidden; }
       const c = lastPublished;
       const what = c ? (c.summary || c.description) : "";
       if (c) fetch("/api/changes/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: c.id }) }).catch(() => {});
+      // Only changes to the page itself need a reload; server changes are live already.
+      const needsReload = !c || String(c.files || "").split(",").some((f) => f.startsWith("public/"));
+      if (!needsReload) {
+        if (versionAtLoad) { const v = await currentVersion(); if (v) versionAtLoad = v; }
+        watchingForUpdate = false;
+        announce(c.status === "undone" ? "The undo is live now, so I'm back to how I was." : "Your change is live now" + (what ? ": " + what : "") + ".");
+        return;
+      }
+      saveResume();
       const text = c && c.status === "undone"
-        ? "The undo is live now, so I'm back to how I was. I'm refreshing to show it."
-        : "Your change is live now" + (what ? ": " + what : "") + ". I'm refreshing to show it.";
+        ? "The undo is live now, so I'm back to how I was. One moment while I refresh."
+        : "Your change is live now" + (what ? ": " + what : "") + ". One moment while I refresh.";
       const spokenNow = unlocked;
       try { sessionStorage.setItem("frame.updated", JSON.stringify({ text: c && c.status === "undone" ? "The undo is live." : "Now live: " + what, spoken: spokenNow })); } catch {}
       if (spokenNow) {
