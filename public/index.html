@@ -117,6 +117,13 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
   background: var(--wall-raised); border: 1px solid var(--line); color: var(--ink);
   padding: 8px 14px; border-radius: 18px; font-size: 0.88rem; text-align: center; z-index: 2;
 }
+.wake-prompt {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top, 0px) + 20px);
+  background: var(--wall-raised); border: 1px solid var(--line); color: var(--glow-pale);
+  padding: 8px 16px; border-radius: 18px; font-size: 0.95rem; letter-spacing: 0.02em;
+  text-align: center; z-index: 2; pointer-events: none; white-space: nowrap;
+}
 
 .sheet {
   position: absolute; z-index: 4;
@@ -256,6 +263,7 @@ body.no-captions .captions { visibility: hidden; }
     <p class="hint">A new conversation clears the recent back-and-forth. Long-term memory stays.</p>
   </div>
   <div class="note" id="note" hidden></div>
+  <div class="wake-prompt" id="wakePrompt" role="status" hidden>Say “Hey Claude”</div>
 </div>
 
 <div class="below">
@@ -502,6 +510,8 @@ body.no-captions .captions { visibility: hidden; }
   }
   /* wake phrase (app only): between conversations, listen quietly for "Hey Claude" */
   let wakeArmed = false;
+  const wakePrompt = $("#wakePrompt");
+  setInterval(() => { wakePrompt.hidden = !(wakeArmed && state === "idle"); }, 250);   // shown only while waiting for the wake phrase
   function wakeNames() {
     const p = persona !== "claude" ? personaOf(persona) : null;
     return p ? ["claude", p.name] : ["claude"];
