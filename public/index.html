@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Claude Frame">
+<meta name="theme-color" content="#16151c">
+<title>Claude Wall Portrait</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,300;1,6..72,400&family=Outfit:wght@300;400;500&display=swap">
+<style>
+/* Layout: a gallery wall at night. The face is the artwork, lit from within;
+   a museum placard and the spoken captions sit beneath it like a wall label. */
+:root {
+  --wall: #16151c;         /* deep slate with a violet bias, like a dim wall */
+  --wall-raised: #221f2b;
+  --glow: #f6b289;         /* the portrait's warm light */
+  --glow-deep: #c8684f;
+  --glow-pale: #ffe1c7;
+  --eye: #2b1f27;
+  --listen: #8fd3c8;       /* soft teal ring while listening */
+  --ink: #ece6f1;
+  --muted: #a29bb0;
+  --line: #3a3546;
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-ui: "Outfit", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; height: 100%; }
+body {
+  background: var(--wall);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.stage { position: relative; flex: 1; min-height: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+#face { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage:focus-visible { outline: 2px solid var(--listen); outline-offset: -6px; }
+
+.gear {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  right: max(16px, calc(env(safe-area-inset-right, 0px) + 14px));
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--wall-raised); color: var(--muted);
+  display: grid; place-items: center; cursor: pointer; z-index: 3;
+}
+.gear:hover, .gear:focus-visible { color: var(--ink); border-color: var(--muted); outline: none; }
+
+.below {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 4px 18px;
+  display: grid;
+  gap: 16px;
+  max-width: 980px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.captions {
+  height: 7.4em;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 2.2em);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 2.2em);
+  text-align: center;
+}
+.you { color: var(--muted); font-size: 0.95rem; min-height: 1.3em; }
+.you:not(:empty)::before { content: "You  "; letter-spacing: 0.12em; font-size: 0.72rem; text-transform: uppercase; opacity: 0.8; }
+.claude {
+  font-family: var(--font-display); font-style: italic; font-weight: 300;
+  font-size: clamp(1.25rem, 2.6vw, 1.75rem); line-height: 1.32; color: var(--ink);
+  text-wrap: pretty; max-width: 40ch; margin: 0 auto;
+}
+.foot { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px; }
+.placard {
+  border-left: 1px solid var(--line); padding-left: 12px; min-width: 0;
+  display: grid; gap: 2px;
+}
+.placard .name { font-family: var(--font-display); font-style: italic; font-size: 1.05rem; color: var(--ink); }
+.placard .medium { font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; }
+.placard .status { font-size: 0.78rem; color: var(--glow); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 4px; }
+.placard .latency { font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+
+form.type { display: flex; gap: 8px; flex: 1 1 280px; max-width: 460px; min-width: 0; }
+form.type input {
+  flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--ink);
+  background: var(--wall-raised); border: 1px solid var(--line); border-radius: 22px;
+  padding: 10px 16px; -webkit-user-select: text; user-select: text;
+}
+form.type input::placeholder { color: var(--muted); }
+form.type input:focus { outline: none; border-color: var(--listen); }
+form.type button, .sheet button {
+  font: inherit; font-size: 0.9rem; color: var(--wall); background: var(--glow);
+  border: 0; border-radius: 22px; padding: 10px 16px; cursor: pointer;
+}
+form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.note {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 12px; max-width: min(90%, 520px);
+  background: var(--wall-raised); border: 1px solid var(--line); color: var(--ink);
+  padding: 8px 14px; border-radius: 18px; font-size: 0.88rem; text-align: center; z-index: 2;
+}
+
+.sheet {
+  position: absolute; z-index: 4;
+  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  right: max(16px, calc(env(safe-area-inset-right, 0px) + 14px));
+  width: min(320px, calc(100% - 32px));
+  background: var(--wall-raised); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; display: grid; gap: 14px; box-sizing: border-box;
+}
+.sheet h2 { margin: 0; font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 1.15rem; }
+.sheet label { display: grid; gap: 6px; font-size: 0.82rem; color: var(--muted); letter-spacing: 0.02em; }
+.sheet .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--ink); font-size: 0.9rem; }
+.sheet input[type=password] { font: inherit; font-size: 16px; color: var(--ink); background: var(--wall); border: 1px solid var(--line); border-radius: 8px; padding: 8px; -webkit-user-select: text; user-select: text; }
+.sheet select { font: inherit; font-size: 0.9rem; color: var(--ink); background: var(--wall); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.sheet input[type=range] { width: 100%; accent-color: var(--glow); }
+.sheet input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--glow); }
+.sheet .hint { font-size: 0.78rem; color: var(--muted); line-height: 1.45; margin: 0; }
+.sheet button.quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+
+body.no-captions .captions { visibility: hidden; }
+@media (max-height: 560px) { .captions { height: 4.6em; } }
+</style>
+</head>
+<body>
+
+
+<div class="stage" id="stage" tabindex="0" role="button" aria-label="Talk to Claude">
+  <canvas id="face" aria-hidden="true"></canvas>
+  <button class="gear" id="gearBtn" type="button" aria-label="Settings">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+  </button>
+  <div class="sheet" id="sheet" hidden>
+    <h2>Frame settings</h2>
+    <label for="voiceSel">Voice
+      <select id="voiceSel"></select>
+    </label>
+    <label for="rateIn">Speaking speed
+      <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.05">
+    </label>
+    <div class="row"><span>Keep listening after each reply</span><input id="keepIn" type="checkbox" checked></div>
+    <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
+    <label for="modelSel">Model
+      <select id="modelSel">
+        <option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest)</option>
+        <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (deeper, a bit slower)</option>
+      </select>
+    </label>
+    <label for="keyIn">Claude API key
+      <input id="keyIn" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+    </label>
+    <button id="keySave" type="button">Save key</button>
+    <p class="hint" id="keyHint">The key is kept only on this device. It is never put in the page itself.</p>
+    <p class="hint" id="modeHint"></p>
+    <button class="quiet" id="resetBtn" type="button">Start a new conversation</button>
+  </div>
+  <div class="note" id="note" hidden></div>
+</div>
+
+<div class="below">
+  <div class="captions" aria-live="polite">
+    <div class="you" id="youText"></div>
+    <div class="claude" id="claudeText">Hello, Jim. Tap my face and say something.</div>
+  </div>
+  <div class="foot">
+    <div class="placard">
+      <span class="name">Claude</span>
+      <span class="medium">Portrait in voice and light · Clubroom prototype, 2026 · standalone</span>
+      <span class="status" id="statusText">Getting ready</span>
+      <span class="latency" id="latencyText"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const stage = $("#stage"), note = $("#note"), sheet = $("#sheet");
+  const youEl = $("#youText"), claudeEl = $("#claudeText"), statusEl = $("#statusText"), latEl = $("#latencyText");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- settings, kept only on this device ---------- */
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("frame." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("frame." + k, JSON.stringify(v)); } catch {} },
+  };
+  let settings = {
+    voice: store.get("voice", ""),
+    rate: store.get("rate", 1.05),
+    keep: store.get("keep", true),
+    captions: store.get("captions", true),
+    model: store.get("model", "claude-haiku-5-5"),
+    key: store.get("key", ""),
+  };
+  $("#rateIn").value = settings.rate;
+  $("#keepIn").checked = settings.keep;
+  $("#capIn").checked = settings.captions;
+  $("#modelSel").value = settings.model;
+  document.body.classList.toggle("no-captions", !settings.captions);
+
+  /* ---------- state ---------- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let state = "starting";
+  let canListen = !!SR;
+  let history = [];
+  let ctl = null, turn = 0;
+  let heard = "", partial = "", endTimer = 0, silenceTimer = 0, submitted = false, rec = null;
+  let replyText = "", spokenUpTo = 0, streamDone = true, queued = 0, pushedReply = true;
+  let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0;
+
+  const STATUS = {
+    starting: "Getting ready",
+    idle: "Tap the face to talk",
+    listening: "Listening",
+    thinking: "Thinking",
+    speaking: "Tap to interrupt",
+    needkey: "Add your API key in settings",
+    nomic: "Listening isn't available in this browser",
+  };
+  function setState(s) { state = s; statusEl.textContent = STATUS[s]; }
+
+  let noteTimer = 0;
+  function showNote(msg, ms = 5500) {
+    note.textContent = msg; note.hidden = false;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { note.hidden = true; }, ms);
+  }
+
+  function init() {
+    fillVoices();
+    if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices;
+    $("#modeHint").textContent = canListen
+      ? "Listening uses Safari's speech recognition. The first time, allow the microphone and speech recognition."
+      : "This browser can't do speech recognition. On the iPad, open this page in Safari.";
+    if (!settings.key) { setState("needkey"); sheet.hidden = false; claudeEl.textContent = "Hello, Jim. Add your Claude API key in settings to wake me up."; return; }
+    if (!canListen) { setState("nomic"); return; }
+    setState("idle");
+  }
+
+  /* ---------- voices ---------- */
+  function systemVoices() {
+    if (!("speechSynthesis" in window)) return [];
+    return speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
+  }
+  function rankVoice(v) {
+    let s = 0;
+    if (/en[-_]US/i.test(v.lang)) s += 3;
+    if (/premium|enhanced|neural|natural/i.test(v.name)) s += 6;
+    if (/ava|zoe|samantha|evan|nathan|google us english|aria|jenny/i.test(v.name)) s += 3;
+    if (/novelty|whisper|bells|bubbles|zarvox|trinoids|bad news|good news|organ|cellos|jester|superstar|boing|albert|bahh/i.test(v.name)) s -= 20;
+    return s;
+  }
+  function fillVoices() {
+    const sel = $("#voiceSel");
+    const list = systemVoices().sort((a, b) => rankVoice(b) - rankVoice(a));
+    sel.innerHTML = "";
+    if (!list.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "Default voice"; sel.appendChild(o); return; }
+    for (const v of list) { const o = document.createElement("option"); o.value = v.name; o.textContent = v.name; sel.appendChild(o); }
+    if (settings.voice && list.some((v) => v.name === settings.voice)) sel.value = settings.voice;
+    else { sel.value = list[0].name; settings.voice = list[0].name; }
+  }
+  function currentVoice() {
+    const list = systemVoices();
+    return list.find((v) => v.name === settings.voice) || list.sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
+  }
+
+  /* ---------- listening (Safari speech recognition) ---------- */
+  function showYou() { youEl.textContent = (heard + " " + partial).trim(); }
+  function armEndpoint() {
+    clearTimeout(silenceTimer); clearTimeout(endTimer);
+    endTimer = setTimeout(finishListening, 1100);
+  }
+  function finishListening() {
+    clearTimeout(endTimer); clearTimeout(silenceTimer);
+    if (state !== "listening") return;
+    try { rec && rec.stop(); } catch { submitHeard(); }
+  }
+  function submitHeard() {
+    if (submitted || state !== "listening") return;
+    submitted = true;
+    const text = (heard + " " + partial).trim();
+    if (!text) { setState("idle"); youEl.textContent = ""; return; }
+    ask(text);
+  }
+  function startListening(fromGesture) {
+    if (!canListen) { setState("nomic"); return; }
+    heard = ""; partial = ""; submitted = false;
+    youEl.textContent = "";
+    setState("listening");
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => { if (state === "listening" && !heard && !partial) { try { rec && rec.abort(); } catch {} setState("idle"); } }, 9000);
+    try {
+      rec = new SR();
+      rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+      rec.onresult = (ev) => {
+        let fin = "", inter = "";
+        for (let i = 0; i < ev.results.length; i++) {
+          const r = ev.results[i];
+          if (r.isFinal) fin += r[0].transcript; else inter += r[0].transcript;
+        }
+        heard = fin.trim(); partial = inter.trim(); showYou(); armEndpoint();
+      };
+      rec.onerror = (ev) => {
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+          setState("idle");
+          showNote("The microphone or speech recognition is blocked. On the iPad, allow both under Settings → Apps → Safari.", 8000);
+        } else if (ev.error === "no-speech") {
+          setState("idle");
+        }
+      };
+      rec.onend = () => { clearTimeout(endTimer); clearTimeout(silenceTimer); if (state === "listening") submitHeard(); };
+      rec.start();
+    } catch {
+      setState("idle");
+      if (fromGesture) showNote("Listening didn't start. Tap the face to try again.");
+    }
+  }
+
+  /* ---------- asking Claude (streamed) ---------- */
+  function rules() {
+    const now = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    return [
+      "You are Claude, the voice of a digital portrait frame hanging on the wall in Jim's home.",
+      "Everything you write is spoken aloud by a text-to-speech voice, so talk like a warm, curious friend who knows a lot.",
+      "Keep replies short: usually one to three sentences, unless Jim asks for more. Start with the answer itself, with no preamble.",
+      "Never use lists, markdown, emoji, symbols, or web addresses. Write numbers and abbreviations the way you would say them.",
+      "You can't look up live information such as weather, news, or sports scores. If asked, say so briefly and offer what you do know.",
+      "When it fits naturally, you may end with a short question to keep the conversation going.",
+      "The current date and time is " + now + ".",
+    ].join(" ");
+  }
+  function buildMessages() {
+    const merged = [];
+    for (const m of history.slice(-16)) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === m.role) last.content += "\n" + m.content; else merged.push({ role: m.role, content: m.content });
+    }
+    while (merged.length && merged[0].role !== "user") merged.shift();
+    return merged;
+  }
+  function copyFor(err) {
+    const st = err && err.status;
+    if (st === 401 || st === 403) return "The API key wasn't accepted. Check it in settings.";
+    if (st === 429) return "Too many requests or the spending limit was reached. Wait a moment, or check your limits in the Claude Console.";
+    if (st === 529 || st === 503) return "Claude is busy right now. Try again in a moment.";
+    if (err && err.name === "TypeError") return "Couldn't reach Claude. Check the Wi-Fi connection.";
+    return "Claude didn't answer that time. Tap the face to try again.";
+  }
+
+  async function streamClaude(messages, signal, onText) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal,
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": settings.key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({ model: settings.model, max_tokens: 500, system: rules(), messages, stream: true }),
+    });
+    if (!res.ok) { const e = new Error("http " + res.status); e.status = res.status; throw e; }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "", full = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const evt = buf.slice(0, i); buf = buf.slice(i + 2);
+        const line = evt.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        let data; try { data = JSON.parse(line.slice(5)); } catch { continue; }
+        if (data.type === "content_block_delta" && data.delta && data.delta.type === "text_delta") { full += data.delta.text; onText(full); }
+        else if (data.type === "error") { const e = new Error("stream"); e.status = data.error && data.error.type === "overloaded_error" ? 529 : 500; throw e; }
+      }
+    }
+    return full;
+  }
+
+  async function ask(text) {
+    if (!settings.key) { setState("needkey"); sheet.hidden = false; return; }
+    const my = ++turn;
+    finalizeReply();
+    youEl.textContent = text;
+    claudeEl.textContent = "";
+    setState("thinking");
+    history.push({ role: "user", content: text });
+    replyText = ""; spokenUpTo = 0; streamDone = false; queued = 0; pushedReply = false;
+    t0 = performance.now(); firstAudio = false; latEl.textContent = "";
+    ctl = new AbortController();
+    try {
+      const full = await streamClaude(buildMessages(), ctl.signal, (t) => {
+        if (my !== turn) return; replyText = t; claudeEl.textContent = t; pump(false);
+      });
+      if (my !== turn) return;
+      replyText = full; claudeEl.textContent = full;
+      pump(true);
+      history.push({ role: "assistant", content: full }); pushedReply = true;
+      streamDone = true;
+      maybeFinish();
+    } catch (e) {
+      if (my !== turn) return;
+      streamDone = true;
+      if (e && e.name === "AbortError") return;
+      pump(true);
+      finalizeReply();
+      showNote(copyFor(e), 7000);
+      if (queued === 0) setState("idle"); else maybeFinish();
+    }
+  }
+  function finalizeReply() {
+    if (!pushedReply) {
+      const kept = replyText.slice(0, spokenUpTo).trim();
+      if (kept) history.push({ role: "assistant", content: kept + " (interrupted)" });
+      pushedReply = true;
+    }
+  }
+
+  /* ---------- speaking, sentence by sentence ---------- */
+  function pump(final) {
+    const rest = replyText.slice(spokenUpTo);
+    const re = /[.!?…]+["'”’)\]]*\s+/g;
+    let m, last = 0;
+    while ((m = re.exec(rest))) {
+      const chunk = rest.slice(last, m.index + m[0].length);
+      if (chunk.trim().length > 1) speakChunk(chunk);
+      last = m.index + m[0].length;
+    }
+    if (!final && rest.length - last > 150) {
+      const c = rest.lastIndexOf(", ");
+      if (c > last + 40) { speakChunk(rest.slice(last, c + 1)); last = c + 2; }
+    }
+    spokenUpTo += last;
+    if (final) {
+      const tail = replyText.slice(spokenUpTo);
+      if (tail.trim()) speakChunk(tail);
+      spokenUpTo = replyText.length;
+    }
+  }
+  function clean(s) {
+    return s.replace(/[*_#`>~]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").replace(/\s+/g, " ").trim();
+  }
+  function speakChunk(raw) {
+    const text = clean(raw);
+    if (!text || !("speechSynthesis" in window)) return;
+    queued++;
+    const u = new SpeechSynthesisUtterance(text);
+    const v = currentVoice();
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-US";
+    u.rate = Number(settings.rate);
+    u.onstart = () => { sysSpeaking = 1; markAudioStart(); };
+    u.onboundary = () => { kick = 1; };
+    u.onend = u.onerror = () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); };
+    speechSynthesis.speak(u);
+  }
+  function markAudioStart() {
+    if (state === "thinking" || state === "speaking") setState("speaking");
+    if (!firstAudio && t0) {
+      firstAudio = true;
+      latEl.textContent = "First word in " + ((performance.now() - t0) / 1000).toFixed(1) + " s";
+    }
+  }
+  function maybeFinish() {
+    if (!streamDone || queued > 0) return;
+    if (state !== "speaking" && state !== "thinking") return;
+    sysSpeaking = 0;
+    setState("idle");
+    if (settings.keep && canListen && !document.hidden) {
+      setTimeout(() => { if (state === "idle") startListening(false); }, 350);
+    }
+  }
+  function stopSpeech() {
+    queued = 0; streamDone = true;
+    try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch {}
+    sysSpeaking = 0;
+  }
+  function interrupt() {
+    turn++;
+    if (ctl) ctl.abort();
+    stopSpeech();
+    finalizeReply();
+  }
+
+  /* ---------- gestures ---------- */
+  let unlocked = false, wakeLock = null;
+  function unlockAudio() {
+    if (unlocked || !("speechSynthesis" in window)) return;
+    unlocked = true;
+    try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch {}
+  }
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch {}
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && unlocked) keepAwake(); });
+
+  function onTalk() {
+    if (state === "starting") return;
+    if (state === "needkey") { sheet.hidden = false; $("#keyIn").focus(); return; }
+    unlockAudio(); keepAwake();
+    sheet.hidden = true;
+    if (state === "listening") { finishListening(); return; }
+    if (state === "speaking" || state === "thinking") interrupt();
+    startListening(true);
+  }
+  stage.addEventListener("click", (e) => { if (e.target.closest(".gear, .sheet")) return; onTalk(); });
+  stage.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === stage) { e.preventDefault(); onTalk(); } });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === " " && e.target === document.body) { e.preventDefault(); onTalk(); }
+    if (e.key === "Escape") sheet.hidden = true;
+  });
+
+  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; });
+  $("#voiceSel").addEventListener("change", (e) => { settings.voice = e.target.value; store.set("voice", settings.voice); });
+  $("#rateIn").addEventListener("input", (e) => { settings.rate = Number(e.target.value); store.set("rate", settings.rate); });
+  $("#keepIn").addEventListener("change", (e) => { settings.keep = e.target.checked; store.set("keep", settings.keep); });
+  $("#capIn").addEventListener("change", (e) => { settings.captions = e.target.checked; store.set("captions", settings.captions); document.body.classList.toggle("no-captions", !settings.captions); });
+  $("#modelSel").addEventListener("change", (e) => { settings.model = e.target.value; store.set("model", settings.model); });
+  $("#keySave").addEventListener("click", () => {
+    const k = $("#keyIn").value.trim();
+    if (!/^sk-ant-/.test(k)) { $("#keyHint").textContent = "That doesn't look like a Claude API key. It should start with sk-ant-."; return; }
+    settings.key = k; store.set("key", k);
+    $("#keyIn").value = "";
+    $("#keyHint").textContent = "Key saved on this device.";
+    claudeEl.textContent = "Thanks, Jim. Tap my face and say something.";
+    setState(canListen ? "idle" : "nomic");
+    sheet.hidden = true;
+  });
+  $("#resetBtn").addEventListener("click", () => {
+    interrupt(); history = []; youEl.textContent = ""; latEl.textContent = "";
+    claudeEl.textContent = "Fresh start. What's on your mind?";
+    if (settings.key) setState(canListen ? "idle" : "nomic");
+    sheet.hidden = true;
+  });
+
+  /* ---------- the portrait ---------- */
+  const cv = $("#face"), ctx = cv.getContext("2d");
+  const tok = getComputedStyle(document.documentElement);
+  const col = (n) => tok.getPropertyValue(n).trim();
+  const C = { glow: col("--glow"), deep: col("--glow-deep"), pale: col("--glow-pale"), eye: col("--eye"), listen: col("--listen") };
+  function rgba(hex, a) {
+    const h = hex.replace("#", "");
+    const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+  let W = 0, H = 0;
+  function resize() {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const r = cv.getBoundingClientRect();
+    W = r.width; H = r.height;
+    cv.width = Math.max(1, Math.round(W * dpr)); cv.height = Math.max(1, Math.round(H * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(resize).observe(cv);
+  resize();
+
+  const TAU = Math.PI * 2, motion = reduceMotion ? 0.3 : 1;
+  const gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 };
+  let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, thinkAmt = 0, lastT = 0;
+  const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+
+  function frame(ms) {
+    const t = ms / 1000, dt = Math.min(0.05, t - lastT || 0.016); lastT = t;
+    const speakingNow = sysSpeaking > 0;
+
+    if (state === "listening") { gazeT.x = 0; gazeT.y = 0.08; }
+    else if (state === "thinking") { gazeT.x = 0.4; gazeT.y = -0.45; }
+    else if (state === "speaking") { gazeT.x = Math.sin(t * 0.6) * 0.12; gazeT.y = 0.02; }
+    else if (t > nextWander) { gazeT.x = (Math.random() - 0.5) * 0.7; gazeT.y = (Math.random() - 0.5) * 0.4; nextWander = t + 2.2 + Math.random() * 3.5; }
+    gaze.x = ease(gaze.x, gazeT.x, 4, dt); gaze.y = ease(gaze.y, gazeT.y, 4, dt);
+
+    if (t > nextBlink) { blinkAt = t; nextBlink = t + (Math.random() < 0.18 ? 0.35 : 2.4 + Math.random() * 4); }
+    const bp = t - blinkAt;
+    const lid = bp >= 0 && bp < 0.16 ? Math.max(0.06, 1 - Math.sin(Math.PI * bp / 0.16)) : 1;
+
+    kick *= Math.exp(-dt * 7);
+    const mTarget = speakingNow
+      ? Math.min(1, 0.22 + 0.42 * (0.5 + 0.5 * Math.sin(t * 11.7)) * (0.55 + 0.45 * Math.sin(t * 3.9 + 1.3)) + 0.35 * kick)
+      : 0;
+    mouth = ease(mouth, mTarget, 18, dt);
+    listenAmt = ease(listenAmt, state === "listening" ? 1 : 0, 6, dt);
+    thinkAmt = ease(thinkAmt, state === "thinking" ? 1 : 0, 6, dt);
+
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H * 0.52, R = Math.max(40, Math.min(W, H) * 0.28);
+    const breath = Math.sin(t * 1.15) * 0.014 * motion;
+
+    const halo = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R * 2.6);
+    halo.addColorStop(0, rgba(C.glow, 0.2 + 0.08 * listenAmt + 0.1 * mouth));
+    halo.addColorStop(1, rgba(C.glow, 0));
+    ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
+
+    if (listenAmt > 0.01) {
+      for (let i = 0; i < 2; i++) {
+        const p = (t * 0.6 + i * 0.5) % 1;
+        ctx.strokeStyle = rgba(C.listen, listenAmt * 0.55 * (1 - p));
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, R * (1.12 + 0.35 * p * motion), 0, TAU); ctx.stroke();
+      }
+    }
+
+    ctx.beginPath();
+    for (let i = 0; i <= 96; i++) {
+      const th = (i / 96) * TAU;
+      const r = R * (1 + breath + 0.013 * Math.sin(3 * th + t * 0.9) * motion + 0.008 * Math.sin(5 * th - t * 1.3) * motion);
+      const x = cx + Math.cos(th) * r, y = cy + Math.sin(th) * r * 1.05;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    const skin = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.38, R * 0.1, cx, cy, R * 1.1);
+    skin.addColorStop(0, C.pale); skin.addColorStop(0.55, C.glow); skin.addColorStop(1, C.deep);
+    ctx.fillStyle = skin; ctx.fill();
+
+    const ew = R * 0.14, eh = R * 0.23 * lid * (1 + 0.12 * listenAmt);
+    for (const side of [-1, 1]) {
+      const x = cx + side * R * 0.34 + gaze.x * R * 0.12;
+      const y = cy - R * 0.1 + gaze.y * R * 0.1;
+      ctx.fillStyle = C.eye;
+      ctx.beginPath(); ctx.ellipse(x, y, ew / 2, Math.max(1.5, eh / 2), 0, 0, TAU); ctx.fill();
+      if (lid > 0.4) {
+        ctx.fillStyle = "rgba(255,244,236,0.85)";
+        ctx.beginPath(); ctx.arc(x - ew * 0.18, y - eh * 0.2, ew * 0.17, 0, TAU); ctx.fill();
+      }
+    }
+
+    const mx = cx + gaze.x * R * 0.05, my = cy + R * 0.36 + gaze.y * R * 0.04;
+    const open = Math.min(1, mouth * 1.6);
+    if (open < 0.98) {
+      ctx.strokeStyle = rgba(C.eye, 1 - open);
+      ctx.lineWidth = R * 0.034; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(mx, my - R * 0.13, R * 0.17, 0.22 * Math.PI, 0.78 * Math.PI); ctx.stroke();
+    }
+    if (open > 0.02) {
+      ctx.fillStyle = rgba(C.eye, open);
+      ctx.beginPath(); ctx.ellipse(mx, my, R * (0.1 + 0.03 * mouth), R * (0.025 + 0.11 * mouth), 0, 0, TAU); ctx.fill();
+    }
+
+    if (thinkAmt > 0.01) {
+      for (let i = 0; i < 3; i++) {
+        const a = t * 2.2 * motion + (i * TAU) / 3;
+        const x = cx + R * 0.72 + Math.cos(a) * R * 0.13, y = cy - R * 1.05 + Math.sin(a) * R * 0.06;
+        ctx.fillStyle = rgba(C.pale, thinkAmt * (0.5 + 0.5 * Math.sin(a)));
+        ctx.beginPath(); ctx.arc(x, y, R * 0.035, 0, TAU); ctx.fill();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  init();
+})();
+</script>
+</body>
+</html>
