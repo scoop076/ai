@@ -132,6 +132,10 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
 .sheet select, .sheet input[type=password], .sheet input[type=text] { width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0; text-overflow: ellipsis; }
 .sheet .hint { overflow-wrap: anywhere; }
 .sheet button { width: 100%; text-align: center; box-sizing: border-box; }
+.sheet .change { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; gap: 6px; background: var(--wall); min-width: 0; }
+.sheet .change .st { font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--glow); }
+.sheet .change p { margin: 0; font-size: 0.85rem; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.sheet .change p.dim { color: var(--muted); }
 .sheet .memnotes { white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5; max-height: 14em; overflow-y: auto; background: var(--wall); border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--ink); -webkit-user-select: text; user-select: text; }
 .sheet h3 { margin: 6px 0 0; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--glow); }
 .sheet .pair { display: flex; gap: 8px; }
@@ -199,6 +203,11 @@ body.no-captions .captions { visibility: hidden; }
       </select>
     </label>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
+    <div id="changesBox" style="display:none;gap:10px">
+    <h3>Changes to the frame</h3>
+    <p class="hint">Ask me out loud to change how I look or behave. I'll prepare the change and wait for your approval before anything goes live.</p>
+    <div id="changesList" style="display:grid;gap:10px"></div>
+    </div>
     <div id="memBox" style="display:none;gap:14px">
     <h3>Memory</h3>
     <p class="hint" id="memSummary">Everything you say here is remembered across all your screens.</p>
@@ -313,7 +322,9 @@ body.no-captions .captions { visibility: hidden; }
   let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0, testing = false;
   let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
   let elSpeaking = false, elFailed = false;
-  let srvClaude = false, srvEleven = false, srvMemory = false;   // keys held as Cloudflare secrets
+  let srvClaude = false, srvEleven = false, srvMemory = false, changesEnabled = false;
+  let seenChanges = null, pageSig = null, watchingForUpdate = false, announcing = false;
+  const loadedAt = Date.now();   // keys held as Cloudflare secrets
   const haveClaude = () => srvClaude || !!settings.key;
   const haveEleven = () => srvEleven || !!settings.elKey;
 
@@ -343,8 +354,13 @@ body.no-captions .captions { visibility: hidden; }
   async function init() {
     try {
       const r = await fetch("/api/config", { cache: "no-store" });
-      if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; }
+      if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; changesEnabled = !!c.changes; }
     } catch {}
+    if (changesEnabled) {
+      pageSignature().then((sig) => { pageSig = sig; }).catch(() => {});
+      pollChanges();
+      setInterval(pollChanges, 15000);
+    }
     await pullPrefs();
     if (srvClaude) { $("#claudeKeyBox").style.display = "none"; $("#keyHint").textContent = "Your Claude key is stored securely on your Cloudflare server."; }
     if (srvEleven) { $("#elKeyBox").style.display = "none"; }
@@ -717,6 +733,11 @@ body.no-captions .captions { visibility: hidden; }
     sysSpeaking = 0;
     setState("idle");
     if (testing) { testing = false; return; }
+    if (announcing) {
+      announcing = false;
+      if (sessionActive()) setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
+      return;
+    }
     if (settings.stay && canListen && !document.hidden) {
       extendSession();
       setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
@@ -773,7 +794,7 @@ body.no-captions .captions { visibility: hidden; }
     if (e.key === "Escape") sheet.hidden = true;
   });
 
-  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); } });
+  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); pollChanges(); } });
 
   /* ---------- shared voice settings (same on every screen) ---------- */
   async function pullPrefs() {
@@ -808,6 +829,96 @@ body.no-captions .captions { visibility: hidden; }
   $("#elVoiceSel").addEventListener("change", pushPrefs);
   $("#elModelSel").addEventListener("change", pushPrefs);
   $("#rateIn").addEventListener("change", pushPrefs);
+
+  /* ---------- changes the frame makes to itself ---------- */
+  const CHANGE_LABEL = { queued: "Waiting to start", working: "Working on it", ready: "Ready for your approval", failed: "Didn't work", merged: "Published", discarded: "Discarded", undone: "Undone" };
+  function renderChanges(list) {
+    const box = $("#changesBox"), wrap = $("#changesList");
+    box.style.display = changesEnabled ? "grid" : "none";
+    wrap.innerHTML = "";
+    if (!list.length) {
+      const p = document.createElement("p"); p.className = "hint"; p.textContent = "No changes yet. Try saying \"make your eyes a little bigger.\"";
+      wrap.appendChild(p); return;
+    }
+    for (const c of list) {
+      const card = document.createElement("div"); card.className = "change";
+      const st = document.createElement("span"); st.className = "st"; st.textContent = "#" + c.id + " · " + (CHANGE_LABEL[c.status] || c.status);
+      const asked = document.createElement("p"); asked.textContent = c.summary || c.description;
+      card.append(st, asked);
+      if (c.spoken && c.status === "ready") { const d = document.createElement("p"); d.className = "dim"; d.textContent = c.spoken; card.appendChild(d); }
+      if (c.status === "failed" && c.error) { const d = document.createElement("p"); d.className = "dim"; d.textContent = c.error; card.appendChild(d); }
+      if (c.status === "ready") {
+        const pair = document.createElement("div"); pair.className = "pair";
+        const ok = document.createElement("button"); ok.type = "button"; ok.textContent = "Approve";
+        const no = document.createElement("button"); no.type = "button"; no.className = "quiet"; no.textContent = "Discard";
+        ok.onclick = () => changeAction("approve", c.id, ok);
+        no.onclick = () => changeAction("discard", c.id, no);
+        pair.append(ok, no); card.appendChild(pair);
+      }
+      wrap.appendChild(card);
+    }
+  }
+  async function changeAction(kind, id, btn) {
+    btn.disabled = true; btn.textContent = kind === "approve" ? "Publishing..." : "Discarding...";
+    try {
+      const r = await fetch("/api/changes/" + kind, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
+      const res = await r.json();
+      showNote(res.message || "Done.", 8000);
+    } catch { showNote("That didn't go through. Try again."); }
+    pollChanges();
+  }
+  async function pollChanges() {
+    if (!changesEnabled || document.hidden) return;
+    try {
+      const r = await fetch("/api/changes", { cache: "no-store" });
+      if (!r.ok) return;
+      const { changes = [] } = await r.json();
+      renderChanges(changes);
+      if (seenChanges) {
+        for (const c of changes) {
+          const before = seenChanges[c.id];
+          const isNew = !before && c.ts > loadedAt;
+          if (before === c.status) continue;
+          if (c.status === "ready" && (before || isNew)) announce("Your change is ready. " + (c.spoken || c.summary) + " Should I publish it?");
+          if (c.status === "failed" && (before || isNew)) announce("That change didn't work out. " + (c.error || "") + " You could try asking a different way.");
+        }
+      }
+      seenChanges = Object.fromEntries(changes.map((c) => [c.id, c.status]));
+      const published = changes.filter((c) => (c.status === "merged" || c.status === "undone") && c.updated > loadedAt);
+      if (published.length) watchForUpdate();
+    } catch {}
+  }
+  function announce(text) {
+    showNote(text, 12000);
+    if (state !== "idle" || !unlocked) return;
+    announcing = true; t0 = 0; streamDone = true; queued = 0;
+    setState("speaking");
+    speakChunk(text);
+    if (queued === 0) { announcing = false; setState("idle"); }
+  }
+  async function pageSignature() {
+    const t = await (await fetch("/", { cache: "no-store" })).text();
+    let h = 0;
+    for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+    return h + ":" + t.length;
+  }
+  // After a change is published, wait for Cloudflare to deploy it, then reload.
+  function watchForUpdate() {
+    if (watchingForUpdate || !pageSig) return;
+    watchingForUpdate = true;
+    let tries = 0;
+    const timer = setInterval(async () => {
+      if (++tries > 36) { clearInterval(timer); watchingForUpdate = false; return; }
+      let sig = null;
+      try { sig = await pageSignature(); } catch {}
+      if (!sig || sig === pageSig) return;
+      const quiet = state === "idle" || (state === "listening" && !heard && !partial);
+      if (!quiet) return;
+      clearInterval(timer);
+      showNote("Updating to the new version...", 3000);
+      setTimeout(() => location.reload(), 1200);
+    }, 10000);
+  }
 
   /* ---------- memory (kept on your Cloudflare server) ---------- */
   async function loadMemory() {

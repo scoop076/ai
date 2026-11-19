@@ -23,6 +23,62 @@ function json(data, status = 200) {
   });
 }
 
+// Tools that let Claude change the frame itself when Jim asks out loud.
+const FRAME_TOOLS = [
+  {
+    name: "request_frame_change",
+    description: "Start changing Claude Frame's own page or code because Jim asked for a change to how the frame looks, sounds or behaves. Say one short sentence before calling it.",
+    input_schema: {
+      type: "object",
+      properties: { description: { type: "string", description: "A clear, complete description of the change for an engineer, including every detail Jim mentioned." } },
+      required: ["description"],
+    },
+  },
+  {
+    name: "approve_frame_change",
+    description: "Publish a change that is ready. Only call this when Jim clearly approves, for example 'approve it', 'publish it' or 'yes, go ahead'.",
+    input_schema: { type: "object", properties: { change_id: { type: "integer" } } },
+  },
+  {
+    name: "discard_frame_change",
+    description: "Throw away a pending change when Jim says no, cancel or discard.",
+    input_schema: { type: "object", properties: { change_id: { type: "integer" } } },
+  },
+  {
+    name: "undo_last_frame_change",
+    description: "Undo the most recently published change when Jim asks to undo it or go back.",
+    input_schema: { type: "object", properties: {} },
+  },
+];
+const CHANGE_WORDS = {
+  queued: "waiting to start", working: "being worked on now", ready: "ready for Jim's approval",
+  failed: "failed", merged: "published", discarded: "discarded", undone: "undone",
+};
+function describeChanges(list) {
+  if (!list.length) return "No changes have been requested yet.";
+  return list.map((c) =>
+    "#" + c.id + " (" + CHANGE_WORDS[c.status] + "): " + c.description.slice(0, 200) +
+    (c.summary ? " | Result: " + c.summary : "") + (c.status === "failed" && c.error ? " | Problem: " + c.error : ""),
+  ).join("\n");
+}
+async function runFrameTool(mem, name, input, device) {
+  if (name === "request_frame_change") {
+    const desc = String((input && input.description) || "").trim();
+    if (!desc) return { ok: false, message: "I didn't catch what you'd like changed. Could you say it again?" };
+    await mem.queueChange(desc, device);
+    return { ok: true, message: "Got it. I'm working on that change now. It usually takes a minute or two, and I'll let you know when it's ready for your approval." };
+  }
+  const id = input && Number.isInteger(input.change_id) ? input.change_id : undefined;
+  if (name === "approve_frame_change") return await mem.approveChange(id);
+  if (name === "discard_frame_change") return await mem.discardChange(id);
+  if (name === "undo_last_frame_change") return await mem.undoLastChange();
+  return { ok: false, message: "" };
+}
+function sseText(text) {
+  return "event: content_block_delta\ndata: " +
+    JSON.stringify({ type: "content_block_delta", index: 99, delta: { type: "text_delta", text } }) + "\n\n";
+}
+
 function memoryStub(env) {
   return env.MEMORY.get(env.MEMORY.idFromName("jim"));
 }
@@ -89,7 +145,7 @@ export default {
 
     // Which keys does the server hold?
     if (url.pathname === "/api/config") {
-      return json({ claude: !!env.ANTHROPIC_API_KEY, eleven: !!env.ELEVENLABS_API_KEY, memory: !!env.MEMORY });
+      return json({ claude: !!env.ANTHROPIC_API_KEY, eleven: !!env.ELEVENLABS_API_KEY, memory: !!env.MEMORY, changes: !!env.FRAME_GITHUB_TOKEN });
     }
 
     // Chat with memory: builds the conversation from saved history and notes,
@@ -102,13 +158,21 @@ export default {
       const device = String(body.device || "").slice(0, 60);
       if (!text) return json({ error: "Nothing to send." }, 400);
       const mem = memoryStub(env);
-      const [recent, notes] = await Promise.all([mem.recent(30), mem.getNotes()]);
+      const canChange = !!env.FRAME_GITHUB_TOKEN;
+      const [recent, notes, changeList] = await Promise.all([mem.recent(30), mem.getNotes(), canChange ? mem.listChanges(5) : []]);
       const system =
         (typeof body.system === "string" ? body.system.slice(0, 6000) : "") +
         "\n\nYour long-term memory of Jim and your past conversations (your own notes):\n" +
         (notes || "(Nothing yet. This may be one of your first conversations.)") +
         "\n\nThe conversation below may span several of Jim's screens and earlier sessions. Jim's messages start with the time and screen in brackets; " +
-        "never repeat those brackets yourself. Use what you remember naturally, the way a friend would, without reciting your notes.";
+        "never repeat those brackets yourself. Use what you remember naturally, the way a friend would, without reciting your notes." +
+        (canChange
+          ? "\n\nYou can change yourself. When Jim asks you to change how the frame looks, sounds or behaves (your face, voice handling, settings, features), " +
+            "call request_frame_change with a clear description; it is saved for his approval, never published right away. " +
+            "When a change is ready, summarize it and ask whether to publish. Use approve_frame_change only when Jim clearly says yes, " +
+            "discard_frame_change when he says no, and undo_last_frame_change when he asks to undo. Keep what you say about this short.\n" +
+            "Recent changes to yourself:\n" + describeChanges(changeList)
+          : "");
       const upstream = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
@@ -117,6 +181,7 @@ export default {
           max_tokens: 600,
           system,
           messages: buildMessages(recent, text, device),
+          ...(canChange ? { tools: FRAME_TOOLS } : {}),
           stream: true,
         }),
       });
@@ -131,6 +196,7 @@ export default {
         const reader = upstream.body.getReader();
         const dec = new TextDecoder();
         let buf = "", full = "", heard = true;
+        const toolBlocks = {}, toolCalls = [];
         for (;;) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -144,7 +210,23 @@ export default {
             try {
               const d = JSON.parse(line.slice(5));
               if (d.type === "content_block_delta" && d.delta && d.delta.type === "text_delta") full += d.delta.text;
+              else if (d.type === "content_block_start" && d.content_block && d.content_block.type === "tool_use") toolBlocks[d.index] = { name: d.content_block.name, json: "" };
+              else if (d.type === "content_block_delta" && d.delta && d.delta.type === "input_json_delta" && toolBlocks[d.index]) toolBlocks[d.index].json += d.delta.partial_json || "";
+              else if (d.type === "content_block_stop" && toolBlocks[d.index]) { toolCalls.push(toolBlocks[d.index]); delete toolBlocks[d.index]; }
             } catch {}
+          }
+        }
+        // Carry out any change requests, and say the result if Claude didn't.
+        for (const call of toolCalls) {
+          let input = {};
+          try { input = call.json ? JSON.parse(call.json) : {}; } catch {}
+          let result;
+          try { result = await runFrameTool(mem, call.name, input, device); }
+          catch (e) { result = { ok: false, message: "Something went wrong with that change: " + String((e && e.message) || e).slice(0, 120) }; }
+          if (result.message && (!full.trim() || !result.ok)) {
+            const say = (full.trim() ? " " : "") + result.message;
+            full += say;
+            if (heard) { try { await writer.write(new TextEncoder().encode(sseText(say))); } catch { heard = false; } }
           }
         }
         try { await writer.close(); } catch {}
@@ -156,6 +238,18 @@ export default {
       return new Response(readable, {
         headers: { "content-type": "text/event-stream", "cache-control": "no-store" },
       });
+    }
+
+    // Changes the frame makes to itself (also approved from the settings panel).
+    if (url.pathname === "/api/changes" && request.method === "GET") {
+      return json({ enabled: !!env.FRAME_GITHUB_TOKEN, changes: await memoryStub(env).listChanges(6) });
+    }
+    if ((url.pathname === "/api/changes/approve" || url.pathname === "/api/changes/discard") && request.method === "POST") {
+      let body = {};
+      try { body = await request.json(); } catch {}
+      const id = Number.isInteger(body.id) ? body.id : undefined;
+      const mem = memoryStub(env);
+      return json(url.pathname.endsWith("approve") ? await mem.approveChange(id) : await mem.discardChange(id));
     }
 
     // Shared settings: the same voice on every screen.
