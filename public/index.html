@@ -404,7 +404,8 @@ body.no-captions .captions { visibility: hidden; }
     needkey: "Add your API key in settings",
     nomic: "Listening isn't available in this browser",
   };
-  function setState(s) {
+  function setState(s, between) {
+    if (between) { state = s; return; }   // a split-second pause between listening turns: change nothing on screen
     state = s; statusEl.textContent = STATUS[s]; document.body.classList.toggle("is-listening", s === "listening");
     if (s === "idle") setTimeout(armWake, 400); else disarmWake();
   }
@@ -533,8 +534,8 @@ body.no-captions .captions { visibility: hidden; }
   function maybeRelisten() {
     youEl.textContent = "";
     if (sessionActive()) {
-      setState("idle");
-      setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 250);
+      setState("idle", true);
+      setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); else if (state === "idle") setState("idle"); }, 250);
     } else {
       sessionUntil = 0;
       setState("idle");
