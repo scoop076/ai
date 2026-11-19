@@ -739,6 +739,14 @@ body.no-captions .captions { visibility: hidden; }
     return s.replace(/[*_#`>~]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
       .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").replace(/\s+/g, " ").trim();
   }
+  /* Say the status word "live" (on screen, going live, not live) with a long i, "lyve".
+     Only the spoken text changes; captions keep the normal spelling. */
+  const LYVE = (w) => w.replace(/i/i, (c) => (c === "I" ? "Y" : "y"));
+  const LIVE_AFTER = /\b((?:go|goes|going|went|gone|be|being|been|is|are|was|were|am|it's|that's|now|not|isn't|aren't|wasn't|weren't|confirmed|published|deployed|officially|finally)\s+)(live)\b(?!-)(?!\s+(?:in|here|there|near|alone|together|with|without|for|by|off)\b)/gi;
+  const LIVE_ON = /\blive(?=\s+on\s+(?:the\s+|every\s+|all\s+)?(?:screens?|wall)\b)/gi;
+  function pronounce(s) {
+    return s.replace(LIVE_AFTER, (m, lead, w) => lead + LYVE(w)).replace(LIVE_ON, (w) => LYVE(w));
+  }
   /* which voice speaks: ElevenLabs, the free Aura voice, or this device's own */
   const AURA_VOICES = ["luna", "thalia", "andromeda", "helena", "aurora", "athena", "asteria", "cora", "delia", "iris", "juno", "minerva", "ophelia", "phoebe", "theia", "vesta", "amalthea", "callista", "cordelia", "electra", "harmonia", "hera", "pandora",
     "apollo", "orion", "arcas", "aries", "atlas", "draco", "hermes", "hyperion", "janus", "jupiter", "mars", "neptune", "odysseus", "orpheus", "pluto", "saturn", "zeus"];
@@ -765,7 +773,7 @@ body.no-captions .captions { visibility: hidden; }
     sel.value = settings.auraVoice;
   }
   function speakChunk(raw) {
-    const text = clean(raw);
+    const text = pronounce(clean(raw));
     if (!text) return;
     if (useCloud()) { speakEleven(text); return; }
     speakSystem(text);
