@@ -1128,10 +1128,13 @@ body.no-captions .captions { visibility: hidden; }
     unlockAudio(); keepAwake();
     sheet.hidden = true;
     if (state === "listening") {
-      if (heard || partial) { finishListening(); return; }
-      sessionUntil = 0;                       // tap while waiting quietly: stop listening
+      // Touching the face while listening turns listening off; only the wake phrase brings Claude back.
+      sessionUntil = 0;
+      submitted = true;                       // don't send whatever was half-heard
+      clearTimeout(endTimer); clearTimeout(silenceTimer);
+      heard = ""; partial = ""; youEl.textContent = "";
+      setState("idle");                       // set first so ending quietly doesn't submit; this also arms the wake phrase
       try { rec && rec.abort(); } catch {}
-      setState("idle");
       return;
     }
     extendSession();
