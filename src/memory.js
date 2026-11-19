@@ -132,6 +132,17 @@ export class Memory extends DurableObject {
     if (more) await this.ctx.storage.setAlarm(Date.now() + 200);
   }
 
+  markLive(id) {
+    const key = "live_" + id;
+    if (this.getValue(key)) return;
+    this.setValue(key, "1");
+    const job = this.getChange(id);
+    if (!job) return;
+    this.logEvent(job.status === "undone"
+      ? "Undoing change #" + id + " has finished deploying; I'm back to how I was before it."
+      : "Change #" + id + " has finished deploying and is now live on screen: " + job.summary + ".");
+  }
+
   async approveChange(id) {
     const job = id ? this.getChange(id) : this.latestWith("ready");
     if (!job || job.status !== "ready") {
@@ -142,7 +153,7 @@ export class Memory extends DurableObject {
       const sha = await mergeChange(this.env, job);
       this.updateChange(job.id, { status: "merged", merge_sha: sha });
       this.logEvent("Jim approved change #" + job.id + " and it is now published and live on every screen: " + job.summary + ". " + (job.spoken || ""));
-      return { ok: true, message: "Published. The frame will refresh itself in about a minute with the change." };
+      return { ok: true, message: "Approved. It's deploying now, and I'll tell you the moment it's live, usually in about a minute." };
     } catch (e) {
       return { ok: false, message: "I couldn't publish it. " + String((e && e.message) || e).slice(0, 160) };
     }
@@ -164,7 +175,7 @@ export class Memory extends DurableObject {
       await revertChange(this.env, job);
       this.updateChange(job.id, { status: "undone" });
       this.logEvent("Change #" + job.id + " was undone at Jim's request. I'm back to how I was before it: " + job.summary + " is no longer in effect.");
-      return { ok: true, message: "Undone. The frame will go back to how it was in about a minute." };
+      return { ok: true, message: "Okay, undoing it. I'll tell you when I'm back to how I was, usually in about a minute." };
     } catch (e) {
       return { ok: false, message: "I couldn't undo it. " + String((e && e.message) || e).slice(0, 160) };
     }

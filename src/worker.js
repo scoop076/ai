@@ -249,6 +249,15 @@ export default {
     if (url.pathname === "/api/changes" && request.method === "GET") {
       return json({ enabled: !!env.FRAME_GITHUB_TOKEN, changes: await memoryStub(env).listChanges(6) });
     }
+    if (url.pathname === "/api/version") {
+      return json({ id: (env.CF_VERSION_METADATA && env.CF_VERSION_METADATA.id) || null });
+    }
+    if (url.pathname === "/api/changes/live" && request.method === "POST") {
+      let body = {};
+      try { body = await request.json(); } catch {}
+      if (Number.isInteger(body.id)) await memoryStub(env).markLive(body.id);
+      return json({ ok: true });
+    }
     if (url.pathname === "/api/changes/retry" && request.method === "POST") {
       let body = {};
       try { body = await request.json(); } catch {}

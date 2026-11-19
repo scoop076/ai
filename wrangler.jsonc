@@ -11,6 +11,8 @@
     "bindings": [{ "name": "MEMORY", "class_name": "Memory" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Memory"] }],
+  // Lets the frame tell when a new version has finished deploying.
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   // Only ai.liljimjim.com (behind Cloudflare Access) should serve the frame.
   // Keep the workers.dev address and preview URLs switched off on every deploy.
   "workers_dev": false,

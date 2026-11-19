@@ -323,7 +323,8 @@ body.no-captions .captions { visibility: hidden; }
   let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
   let elSpeaking = false, elFailed = false;
   let srvClaude = false, srvEleven = false, srvMemory = false, changesEnabled = false;
-  let seenChanges = null, pageSig = null, watchingForUpdate = false, announcing = false, lastPublished = "";
+  let seenChanges = null, pageSig = null, watchingForUpdate = false, announcing = false, lastPublished = null;
+  let versionAtLoad = null, reloadAfterSpeech = false;
   const loadedAt = Date.now();   // keys held as Cloudflare secrets
   const haveClaude = () => srvClaude || !!settings.key;
   const haveEleven = () => srvEleven || !!settings.elKey;
@@ -353,8 +354,14 @@ body.no-captions .captions { visibility: hidden; }
 
   async function init() {
     try {
-      const upd = sessionStorage.getItem("frame.updated");
-      if (upd) { sessionStorage.removeItem("frame.updated"); setTimeout(() => showNote("I've been updated. " + upd, 9000), 800); }
+      const raw = sessionStorage.getItem("frame.updated");
+      if (raw) {
+        sessionStorage.removeItem("frame.updated");
+        let upd = { text: raw, spoken: false };
+        try { upd = JSON.parse(raw); } catch {}
+        setTimeout(() => showNote("I've been updated. " + upd.text, 9000), 800);
+        if (!upd.spoken) pendingAnnounce = "I've been updated. " + upd.text;   // said on the next tap
+      }
     } catch {}
     try {
       const r = await fetch("/api/config", { cache: "no-store" });
@@ -362,6 +369,7 @@ body.no-captions .captions { visibility: hidden; }
     } catch {}
     if (changesEnabled) {
       pageSignature().then((sig) => { pageSig = sig; }).catch(() => {});
+      currentVersion().then((v) => { versionAtLoad = v; });
       pollChanges();
       setInterval(pollChanges, 15000);
     }
@@ -743,6 +751,7 @@ body.no-captions .captions { visibility: hidden; }
     if (testing) { testing = false; return; }
     if (announcing) {
       announcing = false;
+      if (reloadAfterSpeech) { location.reload(); return; }
       if (settings.stay && canListen && !document.hidden) {   // listen for "approve" or "discard"
         extendSession();
         setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
@@ -904,7 +913,7 @@ body.no-captions .captions { visibility: hidden; }
       seenChanges = Object.fromEntries(changes.map((c) => [c.id, c.status]));
       if (pendingAnnounce) tryAnnounce();
       const published = changes.filter((c) => (c.status === "merged" || c.status === "undone") && c.updated > loadedAt);
-      if (published.length) { lastPublished = (published[0].status === "undone" ? "Undone: " : "Now live: ") + (published[0].summary || published[0].description); watchForUpdate(); }
+      if (published.length) { lastPublished = published[0]; watchForUpdate(); }
     } catch {}
   }
   // Say news about a change out loud, then listen for Jim's answer.
@@ -936,22 +945,42 @@ body.no-captions .captions { visibility: hidden; }
     for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
     return h + ":" + t.length;
   }
-  // After a change is published, wait for Cloudflare to deploy it, then reload.
+  async function currentVersion() {
+    try { const r = await fetch("/api/version", { cache: "no-store" }); const j = await r.json(); return j.id || null; }
+    catch { return null; }
+  }
+  // After a change is published, wait for Cloudflare to finish deploying it,
+  // say so out loud, then reload into the new version.
   function watchForUpdate() {
-    if (watchingForUpdate || !pageSig) return;
+    if (watchingForUpdate || (!versionAtLoad && !pageSig)) return;
     watchingForUpdate = true;
     let tries = 0;
     const timer = setInterval(async () => {
       if (++tries > 36) { clearInterval(timer); watchingForUpdate = false; return; }
-      let sig = null;
-      try { sig = await pageSignature(); } catch {}
-      if (!sig || sig === pageSig) return;
+      let changed = false;
+      if (versionAtLoad) { const v = await currentVersion(); changed = !!v && v !== versionAtLoad; }
+      else { let sig = null; try { sig = await pageSignature(); } catch {} changed = !!sig && sig !== pageSig; }
+      if (!changed) return;
       const quiet = state === "idle" || (state === "listening" && !heard && !partial);
       if (!quiet) return;
       clearInterval(timer);
-      showNote("Updating to the new version...", 3000);
-      try { if (lastPublished) sessionStorage.setItem("frame.updated", lastPublished); } catch {}
-      setTimeout(() => location.reload(), 1200);
+      const c = lastPublished;
+      const what = c ? (c.summary || c.description) : "";
+      if (c) fetch("/api/changes/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: c.id }) }).catch(() => {});
+      const text = c && c.status === "undone"
+        ? "The undo is live now, so I'm back to how I was. I'm refreshing to show it."
+        : "Your change is live now" + (what ? ": " + what : "") + ". I'm refreshing to show it.";
+      const spokenNow = unlocked;
+      try { sessionStorage.setItem("frame.updated", JSON.stringify({ text: c && c.status === "undone" ? "The undo is live." : "Now live: " + what, spoken: spokenNow })); } catch {}
+      if (spokenNow) {
+        reloadAfterSpeech = true;
+        pendingAnnounce = text;
+        if (!tryAnnounce()) { setTimeout(() => location.reload(), 1500); return; }
+        setTimeout(() => location.reload(), 20000);       // in case speech never finishes
+      } else {
+        showNote(text, 4000);
+        setTimeout(() => location.reload(), 2500);
+      }
     }, 10000);
   }
 
