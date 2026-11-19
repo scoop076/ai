@@ -203,11 +203,6 @@ body.no-captions .captions { visibility: hidden; }
       </select>
     </label>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
-    <div id="changesBox" style="display:none;gap:10px">
-    <h3>Changes to the frame</h3>
-    <p class="hint">Ask me out loud to change how I look or behave. I'll prepare the change and wait for your approval before anything goes live.</p>
-    <div id="changesList" style="display:grid;gap:10px"></div>
-    </div>
     <div id="memBox" style="display:none;gap:14px">
     <h3>Memory</h3>
     <p class="hint" id="memSummary">Everything you say here is remembered across all your screens.</p>
@@ -901,7 +896,6 @@ body.no-captions .captions { visibility: hidden; }
       const r = await fetch("/api/changes", { cache: "no-store" });
       if (!r.ok) return;
       const { changes = [] } = await r.json();
-      renderChanges(changes);
       if (seenChanges) {
         for (const c of changes) {
           const before = seenChanges[c.id];
