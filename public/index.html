@@ -474,7 +474,7 @@ body.no-captions .captions { visibility: hidden; }
   function showYou() { youEl.textContent = (heard + " " + partial).trim(); }
   function armEndpoint() {
     clearTimeout(silenceTimer); clearTimeout(endTimer);
-    endTimer = setTimeout(finishListening, 1100);
+    endTimer = setTimeout(finishListening, 2500);   // pause after Jim stops speaking before Claude replies
   }
   function finishListening() {
     clearTimeout(endTimer); clearTimeout(silenceTimer);
