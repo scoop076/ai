@@ -23,6 +23,14 @@ function json(data, status = 200) {
   });
 }
 
+// Claude's built-in web search, run on Anthropic's side (about 1 cent per search).
+const WEB_SEARCH = {
+  type: "web_search_20250305",
+  name: "web_search",
+  max_uses: 4,
+  user_location: { type: "approximate", city: "Collinsville", region: "Illinois", country: "US", timezone: "America/Chicago" },
+};
+
 // Tools that let Claude change the frame itself when Jim asks out loud.
 const FRAME_TOOLS = [
   {
@@ -157,7 +165,7 @@ export default {
 
     // Which keys does the server hold?
     if (url.pathname === "/api/config") {
-      return json({ claude: !!env.ANTHROPIC_API_KEY, eleven: !!env.ELEVENLABS_API_KEY, memory: !!env.MEMORY, changes: !!env.FRAME_GITHUB_TOKEN });
+      return json({ claude: !!env.ANTHROPIC_API_KEY, eleven: !!env.ELEVENLABS_API_KEY, memory: !!env.MEMORY, changes: !!env.FRAME_GITHUB_TOKEN, search: true });
     }
 
     // Chat with memory: builds the conversation from saved history and notes,
@@ -179,6 +187,9 @@ export default {
         (notes || "(Nothing yet. This may be one of your first conversations.)") +
         "\n\nThe conversation below may span several of Jim's screens and earlier sessions. Jim's messages start with the time and screen in brackets; " +
         "never repeat those brackets yourself. Use what you remember naturally, the way a friend would, without reciting your notes." +
+        "\n\nYou can search the web. Use it whenever Jim asks about current events, facts you're unsure of, prices, places, or anything for his research. " +
+        "Before searching, say one short sentence like 'Let me look that up.' Then answer conversationally in a few sentences, mentioning sources by name " +
+        "(for example 'according to the Mayo Clinic') but never reading out web addresses. For research, give the key findings and offer to dig deeper." +
         (canChange
           ? "\n\nYou can change yourself. When Jim asks you to change how the frame looks, sounds or behaves (your face, voice handling, settings, features), " +
             "call request_frame_change with a clear description; it is saved for his approval, never published right away. " +
@@ -196,10 +207,10 @@ export default {
         headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: CLAUDE_MODELS.includes(body.model) ? body.model : CLAUDE_MODELS[0],
-          max_tokens: 600,
+          max_tokens: 900,
           system,
           messages: buildMessages(recent, text, device),
-          ...(canChange ? { tools: FRAME_TOOLS } : {}),
+          tools: [WEB_SEARCH, ...(canChange ? FRAME_TOOLS : [])],
           stream: true,
         }),
       });
