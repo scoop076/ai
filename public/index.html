@@ -462,6 +462,7 @@ body.no-captions .captions { visibility: hidden; }
   }
   function startListening(fromGesture, watchdog) {
     if (!canListen) { setState("nomic"); return; }
+    audioSession("auto");                    // let Safari set up the microphone normally
     heard = ""; partial = ""; submitted = false;
     youEl.textContent = "";
     setState("listening");
@@ -686,6 +687,9 @@ body.no-captions .captions { visibility: hidden; }
     u.onend = u.onerror = () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); };
     speechSynthesis.speak(u);
   }
+  function audioSession(type) {
+    try { if (navigator.audioSession && navigator.audioSession.type !== type) navigator.audioSession.type = type; } catch {}
+  }
   /* ---------- ElevenLabs: lifelike voice, sentence by sentence ---------- */
   function ensureAudio() {
     if (!actx) {
@@ -754,6 +758,7 @@ body.no-captions .captions { visibility: hidden; }
       const src = actx.createBufferSource();
       src.buffer = buf;
       src.connect(analyser);
+      audioSession("playback");              // speak even when the iPhone is on silent
       curSource = src; elSpeaking = true;
       src.onended = () => { if (curSource === src) { curSource = null; elSpeaking = false; } res(); };
       markAudioStart();
