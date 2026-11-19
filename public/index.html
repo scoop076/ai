@@ -533,14 +533,14 @@ body.no-captions .captions { visibility: hidden; }
     if (APP) toApp({ type: "wakeOff" });
   }
   /* wake phrase (browser): listen quietly and ignore everything except "Hey Claude" */
-  let webWake = null, webWakeTimer = 0;
+  let webWake = null, webWakeTimer = 0, webWakeHit = null;
   function wakeRegex() {
     const names = wakeNames().map((n) => String(n).replace(/[^\w\s]/g, "")).filter(Boolean);
     return new RegExp("\\bhey,?\\s+(?:" + names.join("|") + ")\\b[\\s,.!?:;-]*", "i");
   }
   function stopWebWake() {
     clearTimeout(webWakeTimer);
-    const r = webWake; webWake = null;
+    const r = webWake; webWake = null; webWakeHit = null;
     if (r) { try { r.abort(); } catch {} }
   }
   function startWebWake() {
@@ -556,10 +556,11 @@ body.no-captions .captions { visibility: hidden; }
       const m = wakeRegex().exec(text);
       if (!m) return;
       const rest = text.slice(m.index + m[0].length).trim();
+      webWakeHit = rest;                      // remembered in case the recognizer ends before the timer fires
       clearTimeout(webWakeTimer);
       webWakeTimer = setTimeout(() => {
         if (webWake !== r) return;
-        webWake = null;
+        webWake = null; webWakeHit = null;
         try { r.abort(); } catch {}
         wakeHeard(rest);
       }, rest ? 1300 : 600);
@@ -571,9 +572,13 @@ body.no-captions .captions { visibility: hidden; }
       if (webWake !== r) return;
       webWake = null;
       clearTimeout(webWakeTimer);
+      if (webWakeHit !== null) { const hit = webWakeHit; webWakeHit = null; wakeHeard(hit); return; }   // the phrase was heard just as listening ended
       webWakeTimer = setTimeout(() => { if (wakeArmed && !webWake && state === "idle") startWebWake(); }, 600);
     };
-    try { r.start(); } catch { webWake = null; }
+    try { r.start(); } catch {
+      webWake = null;
+      webWakeTimer = setTimeout(() => { if (wakeArmed && !webWake && state === "idle") startWebWake(); }, 1500);
+    }
   }
   function wakeHeard(rest) {
     if (state !== "idle") return;
