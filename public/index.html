@@ -1126,7 +1126,7 @@ body.no-captions .captions { visibility: hidden; }
     skin.addColorStop(0, C.pale); skin.addColorStop(0.55, C.glow); skin.addColorStop(1, C.deep);
     ctx.fillStyle = skin; ctx.fill();
 
-    const ew = R * 0.175, eh = R * 0.29 * lid * (1 + 0.12 * listenAmt);
+    const ew = R * 0.135, eh = R * 0.22 * lid * (1 + 0.12 * listenAmt);
     for (const side of [-1, 1]) {
       const x = cx + side * R * 0.34 + gaze.x * R * 0.12;
       const y = cy - R * 0.1 + gaze.y * R * 0.1;
