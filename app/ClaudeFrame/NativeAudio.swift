@@ -77,6 +77,15 @@ final class NativeAudio: NSObject {
         }
     }
 
+    /// Turn the audio on (in the background), then carry on with `then` on the main thread.
+    private func whenActive(_ then: @escaping () -> Void) {
+        sessionReady = true
+        sessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(true)
+            DispatchQueue.main.async(execute: then)
+        }
+    }
+
     /// Make sure the audio is on. Cheap when it already is.
     func activate(force: Bool = false) {
         if sessionReady && !force { return }
@@ -162,7 +171,7 @@ final class NativeAudio: NSObject {
         NativeAudio.askPermission { [weak self] allowed in
             guard let self, self.listenId == id else { return }
             if allowed {
-                self.begin(id: id, lang: lang)
+                self.whenActive { if self.listenId == id { self.begin(id: id, lang: lang) } }
             } else {
                 self.send(["type": "error", "id": id, "error": "not-allowed"])
                 self.finish(id)
@@ -191,7 +200,6 @@ final class NativeAudio: NSObject {
         req.taskHint = .dictation
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }   // faster, no daily limit
 
-        activate()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { failedToStart(id); return }
@@ -289,7 +297,7 @@ final class NativeAudio: NSObject {
         gotText = false
         NativeAudio.askPermission { [weak self] allowed in
             guard let self, self.listenId == id, self.mode == .wake else { return }
-            if allowed { self.begin(id: id, lang: "en-US") } else { self.listenId = nil; self.wakeWanted = false }
+            if allowed { self.whenActive { if self.listenId == id && self.mode == .wake { self.begin(id: id, lang: "en-US") } } } else { self.listenId = nil; self.wakeWanted = false }
         }
         // Recognition sessions are kept short; start a fresh one every 50 seconds.
         Task { @MainActor in
@@ -393,23 +401,25 @@ final class NativeAudio: NSObject {
             send(["type": "played", "id": id])
             return
         }
-        activate()
         p.isMeteringEnabled = true
         p.prepareToPlay()
-        guard p.play() else { send(["type": "played", "id": id]); return }
-        player = p
         playId = id
-        if link == nil {
-            let l = CADisplayLink(target: self, selector: #selector(tick))
-            l.preferredFramesPerSecond = 30
-            l.add(to: .main, forMode: .common)
-            link = l
+        whenActive { [weak self] in
+            guard let self, self.playId == id else { return }   // stopped while the audio was waking up
+            guard p.play() else { self.playId = nil; self.send(["type": "played", "id": id]); return }
+            self.player = p
+            if self.link == nil {
+                let l = CADisplayLink(target: self, selector: #selector(self.tick))
+                l.preferredFramesPerSecond = 30
+                l.add(to: .main, forMode: .common)
+                self.link = l
+            }
         }
     }
 
     private func stopPlayback() {
-        guard let p = player, let id = playId else { return }
-        p.stop()
+        guard let id = playId else { return }
+        player?.stop()
         player = nil
         playId = nil
         send(["type": "level", "value": 0])
@@ -469,8 +479,7 @@ final class NativeAudio: NSObject {
                      min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * rate))
         synthEvents.tag(u, id)
         pauseWake()
-        activate()
-        synth.speak(u)
+        whenActive { [weak self] in self?.synth.speak(u) }
     }
 }
 
