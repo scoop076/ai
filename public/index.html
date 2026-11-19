@@ -792,7 +792,10 @@ body.no-captions .captions { visibility: hidden; }
   /* ---------- gestures ---------- */
   let unlocked = false, wakeLock = null;
   function unlockAudio() {
-    if (haveEleven()) ensureAudio();
+    // With the ElevenLabs voice, waking the audio engine is enough. Skip the
+    // silent browser-speech trick: on iPad it grabs the audio system and the
+    // microphone starts deaf on the same tap.
+    if (haveEleven()) { ensureAudio(); unlocked = true; return; }
     if (unlocked || !("speechSynthesis" in window)) return;
     unlocked = true;
     try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch {}
@@ -819,6 +822,7 @@ body.no-captions .captions { visibility: hidden; }
     if (pendingAnnounce && tryAnnounce()) { extendSession(); return; }
     startListening(true);
   }
+  stage.addEventListener("pointerdown", (e) => { if (e.target.closest(".gear, .sheet")) return; if (haveEleven()) ensureAudio(); }, { passive: true });
   stage.addEventListener("click", (e) => { if (e.target.closest(".gear, .sheet")) return; onTalk(); });
   stage.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === stage) { e.preventDefault(); onTalk(); } });
   document.addEventListener("keydown", (e) => {
