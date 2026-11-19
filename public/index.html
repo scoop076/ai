@@ -121,8 +121,12 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
   width: min(320px, calc(100% - 32px));
   background: var(--wall-raised); border: 1px solid var(--line); border-radius: 14px;
   padding: 16px; display: grid; gap: 14px; box-sizing: border-box;
+  max-height: calc(100% - 80px); overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
 .sheet h2 { margin: 0; font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 1.15rem; }
+.sheet h3 { margin: 6px 0 0; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--glow); }
+.sheet .pair { display: flex; gap: 8px; }
+.sheet .pair button { flex: 1; }
 .sheet label { display: grid; gap: 6px; font-size: 0.82rem; color: var(--muted); letter-spacing: 0.02em; }
 .sheet .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--ink); font-size: 0.9rem; }
 .sheet input[type=password] { font: inherit; font-size: 16px; color: var(--ink); background: var(--wall); border: 1px solid var(--line); border-radius: 8px; padding: 8px; -webkit-user-select: text; user-select: text; }
@@ -146,14 +150,32 @@ body.no-captions .captions { visibility: hidden; }
   </button>
   <div class="sheet" id="sheet" hidden>
     <h2>Frame settings</h2>
-    <label for="voiceSel">Voice
+    <h3>Voice</h3>
+    <label for="elKeyIn">ElevenLabs API key
+      <input id="elKeyIn" type="password" placeholder="Paste your ElevenLabs key" autocomplete="off" spellcheck="false">
+    </label>
+    <button id="elKeySave" type="button">Save ElevenLabs key</button>
+    <label for="elVoiceSel">ElevenLabs voice
+      <select id="elVoiceSel"><option value="">Add your ElevenLabs key first</option></select>
+    </label>
+    <label for="elModelSel">Voice quality
+      <select id="elModelSel">
+        <option value="eleven_flash_v2_5">Flash (fastest replies)</option>
+        <option value="eleven_multilingual_v2">Multilingual v2 (most natural, a little slower)</option>
+      </select>
+    </label>
+    <p class="hint" id="elHint">With an ElevenLabs key, Claude speaks in a lifelike voice. Without one, the browser's own voice is used.</p>
+    <label for="voiceSel">Backup voice (this browser)
       <select id="voiceSel"></select>
     </label>
     <label for="rateIn">Speaking speed
       <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.05">
     </label>
+    <button class="quiet" id="testVoiceBtn" type="button">Hear this voice</button>
+    <h3>Conversation</h3>
     <div class="row"><span>Keep listening after each reply</span><input id="keepIn" type="checkbox" checked></div>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
+    <h3>Claude</h3>
     <label for="modelSel">Model
       <select id="modelSel">
         <option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest)</option>
@@ -205,11 +227,15 @@ body.no-captions .captions { visibility: hidden; }
     captions: store.get("captions", true),
     model: store.get("model", "claude-haiku-5-5"),
     key: store.get("key", ""),
+    elKey: store.get("elKey", ""),
+    elVoice: store.get("elVoice", ""),
+    elModel: store.get("elModel", "eleven_flash_v2_5"),
   };
   $("#rateIn").value = settings.rate;
   $("#keepIn").checked = settings.keep;
   $("#capIn").checked = settings.captions;
   $("#modelSel").value = settings.model;
+  $("#elModelSel").value = settings.elModel;
   document.body.classList.toggle("no-captions", !settings.captions);
 
   /* ---------- state ---------- */
@@ -220,7 +246,9 @@ body.no-captions .captions { visibility: hidden; }
   let ctl = null, turn = 0;
   let heard = "", partial = "", endTimer = 0, silenceTimer = 0, submitted = false, rec = null;
   let replyText = "", spokenUpTo = 0, streamDone = true, queued = 0, pushedReply = true;
-  let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0;
+  let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0, testing = false;
+  let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
+  let elSpeaking = false, elFailed = false;
 
   const STATUS = {
     starting: "Getting ready",
@@ -242,6 +270,7 @@ body.no-captions .captions { visibility: hidden; }
 
   function init() {
     fillVoices();
+    if (settings.elKey) loadElVoices();
     if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices;
     $("#modeHint").textContent = canListen
       ? "Listening uses Safari's speech recognition. The first time, allow the microphone and speech recognition."
@@ -458,9 +487,15 @@ body.no-captions .captions { visibility: hidden; }
     return s.replace(/[*_#`>~]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
       .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").replace(/\s+/g, " ").trim();
   }
+  function useEleven() { return !!(settings.elKey && settings.elVoice && !elFailed && ensureAudio()); }
   function speakChunk(raw) {
     const text = clean(raw);
-    if (!text || !("speechSynthesis" in window)) return;
+    if (!text) return;
+    if (useEleven()) { speakEleven(text); return; }
+    speakSystem(text);
+  }
+  function speakSystem(text) {
+    if (!("speechSynthesis" in window)) return;
     queued++;
     const u = new SpeechSynthesisUtterance(text);
     const v = currentVoice();
@@ -471,6 +506,101 @@ body.no-captions .captions { visibility: hidden; }
     u.onend = u.onerror = () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); };
     speechSynthesis.speak(u);
   }
+  /* ---------- ElevenLabs: lifelike voice, sentence by sentence ---------- */
+  function ensureAudio() {
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      actx = new AC();
+      analyser = actx.createAnalyser();
+      analyser.fftSize = 1024;
+      ampBuf = new Uint8Array(analyser.fftSize);
+      analyser.connect(actx.destination);
+    }
+    if (actx.state === "suspended") actx.resume().catch(() => {});
+    return actx;
+  }
+  function elFetch(text) {
+    const speed = Math.min(1.2, Math.max(0.7, Number(settings.rate)));
+    return fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(settings.elVoice) + "?output_format=mp3_44100_128", {
+      method: "POST",
+      headers: { "xi-api-key": settings.elKey, "content-type": "application/json", accept: "audio/mpeg" },
+      body: JSON.stringify({ text, model_id: settings.elModel, voice_settings: { stability: 0.45, similarity_boost: 0.8, speed } }),
+    }).then(async (r) => {
+      if (!r.ok) {
+        let detail = ""; try { const j = await r.json(); detail = JSON.stringify(j); } catch {}
+        const e = new Error("elevenlabs " + r.status); e.status = r.status; e.detail = detail; throw e;
+      }
+      const ab = await r.arrayBuffer();
+      return await new Promise((res, rej) => actx.decodeAudioData(ab, res, rej));
+    });
+  }
+  function speakEleven(text) {
+    queued++;
+    const myGen = gen;
+    const audio = elFetch(text);            // start downloading right away
+    audio.catch(() => {});
+    playChain = playChain.then(async () => {
+      if (myGen !== gen) return;
+      let buf;
+      try { buf = await audio; }
+      catch (e) {
+        if (myGen !== gen) return;
+        elProblem(e);
+        speakSystem(text);                  // say it anyway with the backup voice
+        queued = Math.max(0, queued - 1);
+        return;
+      }
+      await playBuffer(buf, myGen);
+      if (myGen === gen) { queued = Math.max(0, queued - 1); maybeFinish(); }
+    });
+  }
+  function playBuffer(buf, myGen) {
+    return new Promise((res) => {
+      if (myGen !== gen) return res();
+      const src = actx.createBufferSource();
+      src.buffer = buf;
+      src.connect(analyser);
+      curSource = src; elSpeaking = true;
+      src.onended = () => { if (curSource === src) { curSource = null; elSpeaking = false; } res(); };
+      markAudioStart();
+      src.start();
+    });
+  }
+  function elProblem(e) {
+    elFailed = true;
+    const d = (e && e.detail) || "";
+    let msg = "Couldn't reach ElevenLabs, so the backup voice is speaking for now.";
+    if (/quota|credits|limit/i.test(d) || (e && e.status === 429)) msg = "Your ElevenLabs credits are used up for now. The backup voice is speaking.";
+    else if (e && (e.status === 401 || e.status === 403)) msg = "ElevenLabs didn't accept the key or this voice. Check them in settings.";
+    showNote(msg, 8000);
+  }
+  async function loadElVoices() {
+    const sel = $("#elVoiceSel"), hint = $("#elHint");
+    try {
+      const r = await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": settings.elKey } });
+      if (!r.ok) throw Object.assign(new Error("voices " + r.status), { status: r.status });
+      const { voices = [] } = await r.json();
+      sel.innerHTML = "";
+      for (const v of voices) {
+        const o = document.createElement("option");
+        const l = v.labels || {};
+        const extra = [l.gender, l.accent, l.description || l.descriptive].filter(Boolean).join(", ");
+        o.value = v.voice_id; o.textContent = v.name + (extra ? " · " + extra : "");
+        sel.appendChild(o);
+      }
+      if (!voices.length) { sel.innerHTML = '<option value="">No voices on this account yet</option>'; return; }
+      if (!voices.some((v) => v.voice_id === settings.elVoice)) { settings.elVoice = voices[0].voice_id; store.set("elVoice", settings.elVoice); }
+      sel.value = settings.elVoice;
+      elFailed = false;
+      hint.textContent = "Lifelike voice is on. Pick a voice, then tap Hear this voice.";
+    } catch (e) {
+      hint.textContent = e && (e.status === 401 || e.status === 403)
+        ? "ElevenLabs didn't accept that key. Copy it again from your ElevenLabs profile."
+        : "Couldn't load voices from ElevenLabs. Check the connection and try again.";
+    }
+  }
+
   function markAudioStart() {
     if (state === "thinking" || state === "speaking") setState("speaking");
     if (!firstAudio && t0) {
@@ -483,12 +613,16 @@ body.no-captions .captions { visibility: hidden; }
     if (state !== "speaking" && state !== "thinking") return;
     sysSpeaking = 0;
     setState("idle");
+    if (testing) { testing = false; return; }
     if (settings.keep && canListen && !document.hidden) {
       setTimeout(() => { if (state === "idle") startListening(false); }, 350);
     }
   }
   function stopSpeech() {
     queued = 0; streamDone = true;
+    gen++;
+    try { if (curSource) curSource.stop(); } catch {}
+    curSource = null; elSpeaking = false; playChain = Promise.resolve();
     try { if ("speechSynthesis" in window) speechSynthesis.cancel(); } catch {}
     sysSpeaking = 0;
   }
@@ -502,6 +636,7 @@ body.no-captions .captions { visibility: hidden; }
   /* ---------- gestures ---------- */
   let unlocked = false, wakeLock = null;
   function unlockAudio() {
+    if (settings.elKey) ensureAudio();
     if (unlocked || !("speechSynthesis" in window)) return;
     unlocked = true;
     try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch {}
@@ -533,6 +668,26 @@ body.no-captions .captions { visibility: hidden; }
   $("#keepIn").addEventListener("change", (e) => { settings.keep = e.target.checked; store.set("keep", settings.keep); });
   $("#capIn").addEventListener("change", (e) => { settings.captions = e.target.checked; store.set("captions", settings.captions); document.body.classList.toggle("no-captions", !settings.captions); });
   $("#modelSel").addEventListener("change", (e) => { settings.model = e.target.value; store.set("model", settings.model); });
+  $("#elModelSel").addEventListener("change", (e) => { settings.elModel = e.target.value; store.set("elModel", settings.elModel); });
+  $("#elVoiceSel").addEventListener("change", (e) => { settings.elVoice = e.target.value; store.set("elVoice", settings.elVoice); elFailed = false; });
+  $("#elKeySave").addEventListener("click", () => {
+    const k = $("#elKeyIn").value.trim();
+    if (k.length < 20) { $("#elHint").textContent = "That doesn't look like an ElevenLabs key. Copy it from your ElevenLabs profile under API Keys."; return; }
+    settings.elKey = k; store.set("elKey", k); elFailed = false;
+    $("#elKeyIn").value = "";
+    ensureAudio();
+    $("#elHint").textContent = "Key saved on this device. Loading voices...";
+    loadElVoices();
+  });
+  $("#testVoiceBtn").addEventListener("click", () => {
+    unlockAudio(); ensureAudio();
+    if (state === "speaking" || state === "thinking") interrupt();
+    if (state === "listening") { turn++; try { rec && rec.abort(); } catch {} }
+    testing = true; t0 = 0; streamDone = true; queued = 0;
+    setState("speaking");
+    speakChunk("Hi Jim. This is how I'll sound on your wall. Do you like it?");
+    if (queued === 0) { testing = false; setState(settings.key ? "idle" : "needkey"); }
+  });
   $("#keySave").addEventListener("click", () => {
     const k = $("#keyIn").value.trim();
     if (!/^sk-ant-/.test(k)) { $("#keyHint").textContent = "That doesn't look like a Claude API key. It should start with sk-ant-."; return; }
@@ -578,7 +733,7 @@ body.no-captions .captions { visibility: hidden; }
 
   function frame(ms) {
     const t = ms / 1000, dt = Math.min(0.05, t - lastT || 0.016); lastT = t;
-    const speakingNow = sysSpeaking > 0;
+    const speakingNow = sysSpeaking > 0 || elSpeaking;
 
     if (state === "listening") { gazeT.x = 0; gazeT.y = 0.08; }
     else if (state === "thinking") { gazeT.x = 0.4; gazeT.y = -0.45; }
@@ -591,10 +746,17 @@ body.no-captions .captions { visibility: hidden; }
     const lid = bp >= 0 && bp < 0.16 ? Math.max(0.06, 1 - Math.sin(Math.PI * bp / 0.16)) : 1;
 
     kick *= Math.exp(-dt * 7);
-    const mTarget = speakingNow
+    let level = -1;
+    if (elSpeaking && analyser) {
+      analyser.getByteTimeDomainData(ampBuf);
+      let sum = 0;
+      for (let i = 0; i < ampBuf.length; i++) { const v = (ampBuf[i] - 128) / 128; sum += v * v; }
+      level = Math.min(1, Math.sqrt(sum / ampBuf.length) * 5);
+    }
+    const mTarget = level >= 0 ? level : speakingNow
       ? Math.min(1, 0.22 + 0.42 * (0.5 + 0.5 * Math.sin(t * 11.7)) * (0.55 + 0.45 * Math.sin(t * 3.9 + 1.3)) + 0.35 * kick)
       : 0;
-    mouth = ease(mouth, mTarget, 18, dt);
+    mouth = ease(mouth, mTarget, level >= 0 ? 28 : 18, dt);
     listenAmt = ease(listenAmt, state === "listening" ? 1 : 0, 6, dt);
     thinkAmt = ease(thinkAmt, state === "thinking" ? 1 : 0, 6, dt);
 
