@@ -479,7 +479,8 @@ body.no-captions .captions { visibility: hidden; }
   function finishListening() {
     clearTimeout(endTimer); clearTimeout(silenceTimer);
     if (state !== "listening") return;
-    try { rec && rec.stop(); } catch { submitHeard(); }
+    try { rec && rec.stop(); } catch {}
+    submitHeard();                         // show Jim's words and send them now, without waiting for the recognizer to wind down
   }
   /* conversation window: keep listening through pauses until it runs out */
   let sessionUntil = 0;
@@ -514,6 +515,7 @@ body.no-captions .captions { visibility: hidden; }
       rec = new SR();
       rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
       rec.onresult = (ev) => {
+        if (submitted) return;               // already shown and sent; ignore late results
         let fin = "", inter = "";
         for (let i = 0; i < ev.results.length; i++) {
           const r = ev.results[i];
