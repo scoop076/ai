@@ -76,7 +76,7 @@ body {
   mask-image: linear-gradient(to bottom, transparent 0, #000 2.2em);
   text-align: center;
 }
-.you { color: var(--muted); font-size: 0.95rem; min-height: 1.3em; }
+.you { color: var(--ink); font-size: clamp(1.05rem, 2.2vw, 1.4rem); line-height: 1.3; min-height: 1.3em; flex: none; overflow-wrap: anywhere; }
 .you:not(:empty)::before { content: "You  "; letter-spacing: 0.12em; font-size: 0.72rem; text-transform: uppercase; opacity: 0.8; }
 .claude {
   font-family: var(--font-display); font-style: italic; font-weight: 300;
