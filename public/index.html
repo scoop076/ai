@@ -743,9 +743,13 @@ body.no-captions .captions { visibility: hidden; }
     if (testing) { testing = false; return; }
     if (announcing) {
       announcing = false;
-      if (sessionActive()) setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
+      if (settings.stay && canListen && !document.hidden) {   // listen for "approve" or "discard"
+        extendSession();
+        setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
+      }
       return;
     }
+    if (pendingAnnounce && tryAnnounce()) return;
     if (settings.stay && canListen && !document.hidden) {
       extendSession();
       setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
@@ -793,6 +797,7 @@ body.no-captions .captions { visibility: hidden; }
     }
     extendSession();
     if (state === "speaking" || state === "thinking") interrupt();
+    if (pendingAnnounce && tryAnnounce()) { extendSession(); return; }
     startListening(true);
   }
   stage.addEventListener("click", (e) => { if (e.target.closest(".gear, .sheet")) return; onTalk(); });
@@ -897,17 +902,33 @@ body.no-captions .captions { visibility: hidden; }
         }
       }
       seenChanges = Object.fromEntries(changes.map((c) => [c.id, c.status]));
+      if (pendingAnnounce) tryAnnounce();
       const published = changes.filter((c) => (c.status === "merged" || c.status === "undone") && c.updated > loadedAt);
       if (published.length) { lastPublished = (published[0].status === "undone" ? "Undone: " : "Now live: ") + (published[0].summary || published[0].description); watchForUpdate(); }
     } catch {}
   }
+  // Say news about a change out loud, then listen for Jim's answer.
+  let pendingAnnounce = "";
   function announce(text) {
     showNote(text, 12000);
-    if (state !== "idle" || !unlocked) return;
+    pendingAnnounce = text;
+    tryAnnounce();
+  }
+  function tryAnnounce() {
+    if (!pendingAnnounce || !unlocked) return false;   // audio not allowed yet: say it on the next tap
+    if (state === "listening" && !heard && !partial) {
+      setState("idle");                                // pause listening quietly to speak
+      try { rec && rec.abort(); } catch {}
+    }
+    if (state !== "idle") return false;                // mid-conversation: say it when this turn ends
+    const text = pendingAnnounce;
+    pendingAnnounce = "";
     announcing = true; t0 = 0; streamDone = true; queued = 0;
+    claudeEl.textContent = text;
     setState("speaking");
     speakChunk(text);
     if (queued === 0) { announcing = false; setState("idle"); }
+    return true;
   }
   async function pageSignature() {
     const t = await (await fetch("/", { cache: "no-store" })).text();
