@@ -228,6 +228,8 @@ body.no-captions .captions { visibility: hidden; }
         <option value="15">15 minutes</option>
       </select>
     </label>
+    <div class="row" id="wakeRow" hidden><span>Wake me with "Hey Claude"</span><input id="wakeIn" type="checkbox" checked></div>
+    <p class="hint" id="wakeHint" hidden>When the listening time runs out, I keep an ear out for "Hey Claude" (or the current character's name, like "Hey Ellis") on this screen. You can say your question right after it.</p>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
     <div id="memBox" style="display:none;gap:14px">
     <h3>Memory</h3>
@@ -296,6 +298,7 @@ body.no-captions .captions { visibility: hidden; }
     engine: store.get("engine", ""),
     auraVoice: store.get("auraVoice", "luna"),
     deviceName: store.get("deviceName", ""),
+    wake: store.get("wake", true),
   };
 
   /* ---------- where is this screen? ---------- */
@@ -369,6 +372,7 @@ body.no-captions .captions { visibility: hidden; }
     else if (e.type === "sayStart") { const c = sayCbs[e.id]; if (c) c.start(); }
     else if (e.type === "boundary") kick = 1;
     else if (e.type === "spoke") { const c = sayCbs[e.id]; delete sayCbs[e.id]; if (c) c.end(); }
+    else if (e.type === "wake") onWake(e.id, e.text || "");
     else if (e.type === "voices") { nativeVoices = e.voices || []; try { fillVoices(); } catch {} }
   };
   if (APP) setTimeout(() => toApp({ type: "hello" }), 0);
@@ -400,7 +404,10 @@ body.no-captions .captions { visibility: hidden; }
     needkey: "Add your API key in settings",
     nomic: "Listening isn't available in this browser",
   };
-  function setState(s) { state = s; statusEl.textContent = STATUS[s]; document.body.classList.toggle("is-listening", s === "listening"); }
+  function setState(s) {
+    state = s; statusEl.textContent = STATUS[s]; document.body.classList.toggle("is-listening", s === "listening");
+    if (s === "idle") setTimeout(armWake, 400); else disarmWake();
+  }
   setInterval(() => {
     if (state !== "listening") return;
     const left = Math.ceil((sessionUntil - Date.now()) / 60000);
@@ -492,6 +499,33 @@ body.no-captions .captions { visibility: hidden; }
     if (state !== "listening") return;
     try { rec && rec.stop(); } catch { submitHeard(); }
   }
+  /* wake phrase (app only): between conversations, listen quietly for "Hey Claude" */
+  let wakeArmed = false;
+  function wakeNames() {
+    const p = persona !== "claude" ? personaOf(persona) : null;
+    return p ? ["claude", p.name] : ["claude"];
+  }
+  function armWake() {
+    if (!APP || !settings.wake || !canListen || !haveClaude() || document.hidden) return;
+    if (state !== "idle" || sessionActive()) return;
+    wakeArmed = true;
+    toApp({ type: "wakeOn", names: wakeNames() });
+    const p = persona !== "claude" ? personaOf(persona) : null;
+    statusEl.textContent = 'Say "Hey ' + (p ? p.name : "Claude") + '" or tap my face';
+  }
+  function disarmWake() {
+    if (!wakeArmed) return;
+    wakeArmed = false;
+    toApp({ type: "wakeOff" });
+  }
+  function onWake(id, text) {
+    if (state !== "idle") { toApp({ type: "abortListening", id }); return; }
+    wakeArmed = false;
+    unlocked = true;
+    extendSession();
+    startListening(false, false, id, text);
+  }
+
   /* conversation window: keep listening through pauses until it runs out */
   let sessionUntil = 0;
   function extendSession() { sessionUntil = settings.stay ? Date.now() + settings.stay * 60000 : 0; }
@@ -513,7 +547,7 @@ body.no-captions .captions { visibility: hidden; }
     if (!text) { maybeRelisten(); return; }
     ask(text);
   }
-  function startListening(fromGesture, watchdog) {
+  function startListening(fromGesture, watchdog, adoptId, firstWords) {
     if (!canListen) { setState("nomic"); return; }
     audioSession("auto");                    // let Safari set up the microphone normally
     heard = ""; partial = ""; submitted = false;
@@ -523,6 +557,7 @@ body.no-captions .captions { visibility: hidden; }
     silenceTimer = setTimeout(() => { if (state === "listening" && !heard && !partial) { try { rec && rec.abort(); } catch { maybeRelisten(); } } }, 9000);
     try {
       rec = new SR();
+      if (adoptId) { delete listeners[rec.id]; rec.id = adoptId; }   // the app already heard the wake phrase
       rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
       rec.onresult = (ev) => {
         let fin = "", inter = "";
@@ -554,7 +589,10 @@ body.no-captions .captions { visibility: hidden; }
           needTap();
         }, 3000);
       }
-      rec.start();
+      if (adoptId) {
+        listeners[adoptId] = rec;
+        if (firstWords) { partial = firstWords; showYou(); armEndpoint(); }
+      } else rec.start();
     } catch {
       setState("idle");
       if (fromGesture) showNote("Listening didn't start. Tap the face to try again.");
@@ -891,6 +929,7 @@ body.no-captions .captions { visibility: hidden; }
     const sel = $("#personaSel");
     if (sel && [...sel.options].some((o) => o.value === persona)) sel.value = persona;
     if (!quiet) elFailed = false;
+    if (wakeArmed) { wakeArmed = false; armWake(); }
   }
   async function loadPersonas() {
     if (!srvMemory) return;
@@ -1070,7 +1109,7 @@ body.no-captions .captions { visibility: hidden; }
       body: JSON.stringify({ elVoice: settings.elVoice, elModel: settings.elModel, rate: Number(settings.rate), engine: settings.engine || undefined, auraVoice: settings.auraVoice }),
     }).catch(() => {});
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) pullPrefs(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { pullPrefs(); if (state === "idle") setTimeout(armWake, 600); } else wakeArmed = false; });
   $("#elVoiceSel").addEventListener("change", pushPrefs);
   $("#engineSel").addEventListener("change", (e) => {
     settings.engine = e.target.value; store.set("engine", settings.engine);
@@ -1296,6 +1335,12 @@ body.no-captions .captions { visibility: hidden; }
   });
   $("#voiceSel").addEventListener("change", (e) => { settings.voice = e.target.value; store.set("voice", settings.voice); });
   $("#rateIn").addEventListener("input", (e) => { settings.rate = Number(e.target.value); store.set("rate", settings.rate); });
+  if (APP) { $("#wakeRow").hidden = false; $("#wakeHint").hidden = false; }
+  $("#wakeIn").checked = !!settings.wake;
+  $("#wakeIn").addEventListener("change", (e) => {
+    settings.wake = e.target.checked; store.set("wake", settings.wake);
+    if (settings.wake) armWake(); else { disarmWake(); if (state === "idle") setState("idle"); }
+  });
   $("#stayIn").addEventListener("change", (e) => { settings.stay = Number(e.target.value); store.set("stay", settings.stay); if (!settings.stay) sessionUntil = 0; else if (sessionUntil) extendSession(); });
   $("#capIn").addEventListener("change", (e) => { settings.captions = e.target.checked; store.set("captions", settings.captions); document.body.classList.toggle("no-captions", !settings.captions); });
   $("#deviceIn").addEventListener("change", (e) => {

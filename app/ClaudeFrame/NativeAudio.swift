@@ -24,6 +24,15 @@ final class NativeAudio: NSObject {
     private var listenStarted = Date()
     private var quickFailures = 0
 
+    // Wake phrase: between conversations, listen quietly for "Hey Claude".
+    private enum Mode { case listen, wake }
+    private var mode = Mode.listen
+    private var wakeWanted = false
+    private var wakePattern: NSRegularExpression?
+    private var wakeCount = 0
+    private var wakeFastFails = 0
+    private var adoptedFromWake = false
+
     // Playing the cloud voice (ElevenLabs or Aura)
     private var player: AVAudioPlayer?
     private var playId: String?
@@ -65,7 +74,11 @@ final class NativeAudio: NSObject {
     }
 
     func stopAll() {
-        if let id = listenId { teardown(cancel: true); listenId = nil; send(["type": "end", "id": id]) }
+        wakeWanted = false
+        if let id = listenId {
+            teardown(cancel: true); listenId = nil
+            if mode == .listen { send(["type": "end", "id": id]) }
+        }
         stopPlayback()
         synth.stopSpeaking(at: .immediate)
     }
@@ -112,6 +125,10 @@ final class NativeAudio: NSObject {
             say(id: id, text: m["text"] as? String ?? "", voice: m["voice"] as? String ?? "", rate: rate)
         case "stopSay":
             synth.stopSpeaking(at: .immediate)
+        case "wakeOn":
+            wakeOn(names: m["names"] as? [String] ?? ["claude"])
+        case "wakeOff":
+            wakeOff()
         default:
             break
         }
@@ -120,8 +137,14 @@ final class NativeAudio: NSObject {
     // MARK: - Listening
 
     private func startListening(id: String, lang: String) {
-        if let old = listenId { teardown(cancel: true); listenId = nil; send(["type": "end", "id": old]) }
+        if let old = listenId {
+            teardown(cancel: true); listenId = nil
+            if mode == .listen { send(["type": "end", "id": old]) }
+        }
         stopPlayback()
+        wakeWanted = false
+        mode = .listen
+        adoptedFromWake = false
         listenId = id
         gotText = false
         NativeAudio.askPermission { [weak self] allowed in
@@ -197,11 +220,14 @@ final class NativeAudio: NSObject {
     }
 
     private func heardAudio(_ id: String) {
-        if listenId == id { send(["type": "audiostart", "id": id]) }
+        if listenId == id && mode == .listen { send(["type": "audiostart", "id": id]) }
     }
 
-    private func recognized(id: String, text: String?, isFinal: Bool, failed: Bool) {
+    private func recognized(id: String, text rawText: String?, isFinal: Bool, failed: Bool) {
         guard listenId == id else { return }
+        if mode == .wake { wakeHeard(id: id, text: rawText, isFinal: isFinal, failed: failed); return }
+        var text = rawText
+        if adoptedFromWake, let t = rawText { text = afterWakePhrase(t) ?? t }
         if let text, !text.isEmpty {
             gotText = true
             send(["type": "result", "id": id, "text": text, "final": isFinal])
@@ -217,8 +243,88 @@ final class NativeAudio: NSObject {
     }
 
     private func failedToStart(_ id: String) {
+        if mode == .wake { endWakeSession(id, failed: true); return }
         send(["type": "error", "id": id, "error": "audio-capture"])
         finish(id)
+    }
+
+    // MARK: - Wake phrase
+
+    private func wakeOn(names: [String]) {
+        var words = ["claude", "cloud", "clod", "claud", "clawed", "klaud", "claudia"]
+        for n in names {
+            let w = n.lowercased().filter { $0.isLetter }
+            if !w.isEmpty && !words.contains(w) { words.append(w) }
+        }
+        wakePattern = try? NSRegularExpression(pattern: "\\b(hey|hi|okay|ok)[\\s,]+(" + words.joined(separator: "|") + ")\\b",
+                                               options: [.caseInsensitive])
+        wakeWanted = true
+        if listenId == nil { startWake() }
+    }
+
+    private func wakeOff() {
+        wakeWanted = false
+        if listenId != nil, mode == .wake { teardown(cancel: true); listenId = nil }
+    }
+
+    private func startWake() {
+        guard wakeWanted, listenId == nil, player == nil, !synth.isSpeaking else { return }
+        wakeCount += 1
+        let id = "w\(wakeCount)"
+        listenId = id
+        mode = .wake
+        adoptedFromWake = false
+        gotText = false
+        NativeAudio.askPermission { [weak self] allowed in
+            guard let self, self.listenId == id, self.mode == .wake else { return }
+            if allowed { self.begin(id: id, lang: "en-US") } else { self.listenId = nil; self.wakeWanted = false }
+        }
+        // Recognition sessions are kept short; start a fresh one every 50 seconds.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000_000)
+            let me = NativeAudio.shared
+            guard me.listenId == id, me.mode == .wake else { return }
+            me.teardown(cancel: true)
+            me.listenId = nil
+            me.startWake()
+        }
+    }
+
+    private func wakeHeard(id: String, text: String?, isFinal: Bool, failed: Bool) {
+        if let text, let rest = afterWakePhrase(text) {
+            // Heard the phrase: this same session becomes a normal conversation turn,
+            // so words said right after the phrase aren't lost.
+            mode = .listen
+            adoptedFromWake = true
+            wakeFastFails = 0
+            gotText = !rest.isEmpty
+            listenStarted = Date()
+            send(["type": "wake", "id": id, "text": rest])
+            if isFinal || failed { finish(id) }
+            return
+        }
+        if isFinal || failed { endWakeSession(id, failed: failed) }
+    }
+
+    private func endWakeSession(_ id: String, failed: Bool) {
+        let quick = Date().timeIntervalSince(listenStarted) < 1.5
+        teardown(cancel: true)
+        if listenId == id { listenId = nil }
+        wakeFastFails = (failed && quick) ? wakeFastFails + 1 : 0
+        let wait: UInt64 = wakeFastFails >= 3 ? 10_000_000_000 : 300_000_000
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: wait)
+            NativeAudio.shared.startWake()
+        }
+    }
+
+    /// The words after the last "hey claude" in a transcript, or nil if it isn't there.
+    private func afterWakePhrase(_ text: String) -> String? {
+        guard let re = wakePattern else { return nil }
+        let ns = text as NSString
+        guard let m = re.matches(in: text, range: NSRange(location: 0, length: ns.length)).last else { return nil }
+        let rest = ns.substring(from: m.range.location + m.range.length)
+        return rest.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
     /// The page heard a pause: stop the microphone and let the last words come in.
@@ -262,7 +368,13 @@ final class NativeAudio: NSObject {
 
     // MARK: - Playing the cloud voice
 
+    private func pauseWake() {
+        wakeWanted = false
+        if listenId != nil, mode == .wake { teardown(cancel: true); listenId = nil }
+    }
+
     private func play(id: String, base64: String) {
+        pauseWake()
         stopPlayback()
         guard let data = Data(base64Encoded: base64),
               let p = try? AVAudioPlayer(data: data) else {
@@ -344,6 +456,7 @@ final class NativeAudio: NSObject {
         u.rate = max(AVSpeechUtteranceMinimumSpeechRate,
                      min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * rate))
         synthEvents.tag(u, id)
+        pauseWake()
         activate()
         synth.speak(u)
     }
