@@ -5,7 +5,11 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
-  }
+  },
+  // Only ai.liljimjim.com (behind Cloudflare Access) should serve the frame.
+  // Keep the workers.dev address and preview URLs switched off on every deploy.
+  "workers_dev": false,
+  "preview_urls": false
   // Secrets ANTHROPIC_API_KEY and ELEVENLABS_API_KEY are set in the
   // Cloudflare dashboard, never in this file.
 }
