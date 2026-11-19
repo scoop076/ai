@@ -32,7 +32,7 @@ export const PERSONAS = {
   ines: {
     name: "Ines",
     title: "the Studio Muse",
-    greeting: "Ines here. The light in this room has potential, Jim. So do you. What are we making today?",
+    greeting: "Ines here. Jim, the light in this room has potential. So do you. What are we making today?",
     eleven: ["Charlotte", "Matilda", "Laura", "Alice"],
     voiceHint: { gender: "female" },
     aura: "harmonia",
