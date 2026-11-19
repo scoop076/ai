@@ -132,6 +132,7 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
 .sheet select, .sheet input[type=password], .sheet input[type=text] { width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0; text-overflow: ellipsis; }
 .sheet .hint { overflow-wrap: anywhere; }
 .sheet button { width: 100%; text-align: center; box-sizing: border-box; }
+.sheet .memnotes { white-space: pre-wrap; font-size: 0.8rem; line-height: 1.5; max-height: 14em; overflow-y: auto; background: var(--wall); border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--ink); -webkit-user-select: text; user-select: text; }
 .sheet h3 { margin: 6px 0 0; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--glow); }
 .sheet .pair { display: flex; gap: 8px; }
 .sheet .pair button { flex: 1; }
@@ -190,6 +191,12 @@ body.no-captions .captions { visibility: hidden; }
     <h3>Conversation</h3>
     <div class="row"><span>Keep listening after each reply</span><input id="keepIn" type="checkbox" checked></div>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
+    <div id="memBox" style="display:none;gap:14px">
+    <h3>Memory</h3>
+    <p class="hint" id="memSummary">Everything you say here is remembered across all your screens.</p>
+    <div class="memnotes" id="memNotes" hidden></div>
+    <button class="quiet" id="forgetBtn" type="button">Forget everything</button>
+    </div>
     <h3>Claude</h3>
     <label for="modelSel">Model
       <select id="modelSel">
@@ -206,6 +213,7 @@ body.no-captions .captions { visibility: hidden; }
     <p class="hint" id="keyHint">The key is kept only on this device. It is never put in the page itself.</p>
     <p class="hint" id="modeHint"></p>
     <button class="quiet" id="resetBtn" type="button">Start a new conversation</button>
+    <p class="hint">A new conversation clears the recent back-and-forth. Long-term memory stays.</p>
   </div>
   <div class="note" id="note" hidden></div>
 </div>
@@ -449,7 +457,7 @@ body.no-captions .captions { visibility: hidden; }
   }
 
   async function streamClaude(messages, signal, onText) {
-    const res = await fetch(srvClaude ? "/api/claude" : "https://api.anthropic.com/v1/messages", {
+    const res = await fetch(srvClaude ? "/api/chat" : "https://api.anthropic.com/v1/messages", {
       method: "POST",
       signal,
       headers: srvClaude ? { "content-type": "application/json" } : {
@@ -458,7 +466,9 @@ body.no-captions .captions { visibility: hidden; }
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: JSON.stringify({ model: settings.model, max_tokens: 500, system: rules(), messages, stream: true }),
+      body: srvClaude
+        ? JSON.stringify({ model: settings.model, system: rules(), text: messages[messages.length - 1].content, device: placeName() })
+        : JSON.stringify({ model: settings.model, max_tokens: 500, system: rules(), messages, stream: true }),
     });
     if (!res.ok) { const e = new Error("http " + res.status); e.status = res.status; throw e; }
     const reader = res.body.getReader();
@@ -727,7 +737,46 @@ body.no-captions .captions { visibility: hidden; }
     if (e.key === "Escape") sheet.hidden = true;
   });
 
-  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; });
+  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) loadMemory(); });
+
+  /* ---------- memory (kept on your Cloudflare server) ---------- */
+  async function loadMemory() {
+    if (!srvClaude) return;
+    $("#memBox").style.display = "grid";
+    try {
+      const r = await fetch("/api/memory", { cache: "no-store" });
+      if (!r.ok) throw new Error();
+      const m = await r.json();
+      const since = m.since ? new Date(m.since).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "";
+      $("#memSummary").textContent = m.messages
+        ? "I've saved all " + m.messages + " messages from our conversations" + (since ? " since " + since : "") + ", across every screen. Here's what I keep in mind:"
+        : "Nothing saved yet. Everything you say here will be remembered across all your screens.";
+      const notes = $("#memNotes");
+      notes.textContent = m.notes || "";
+      notes.hidden = !m.notes;
+    } catch {
+      $("#memSummary").textContent = "Couldn't load memory right now. Reload the page if you've been away a while.";
+    }
+  }
+  let forgetArmed = 0;
+  $("#forgetBtn").addEventListener("click", async () => {
+    const btn = $("#forgetBtn");
+    if (!forgetArmed) {
+      btn.textContent = "Tap again to erase all memory";
+      forgetArmed = setTimeout(() => { forgetArmed = 0; btn.textContent = "Forget everything"; }, 5000);
+      return;
+    }
+    clearTimeout(forgetArmed); forgetArmed = 0;
+    btn.textContent = "Erasing...";
+    try {
+      const r = await fetch("/api/memory/forget", { method: "POST" });
+      if (!r.ok) throw new Error();
+      history = [];
+      showNote("Memory erased. I'm starting fresh.");
+    } catch { showNote("Couldn't erase memory. Try again."); }
+    btn.textContent = "Forget everything";
+    loadMemory();
+  });
   $("#voiceSel").addEventListener("change", (e) => { settings.voice = e.target.value; store.set("voice", settings.voice); });
   $("#rateIn").addEventListener("input", (e) => { settings.rate = Number(e.target.value); store.set("rate", settings.rate); });
   $("#keepIn").addEventListener("change", (e) => { settings.keep = e.target.checked; store.set("keep", settings.keep); });
@@ -769,6 +818,7 @@ body.no-captions .captions { visibility: hidden; }
     sheet.hidden = true;
   });
   $("#resetBtn").addEventListener("click", () => {
+    if (srvClaude) fetch("/api/memory/new", { method: "POST" }).catch(() => {});
     interrupt(); history = []; youEl.textContent = ""; latEl.textContent = "";
     claudeEl.textContent = "Fresh start. What's on your mind?";
     if (haveClaude()) setState(canListen ? "idle" : "nomic");

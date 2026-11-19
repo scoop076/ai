@@ -6,6 +6,11 @@
     "directory": "./public",
     "binding": "ASSETS"
   },
+  // The frame's memory: every exchange plus Claude's long-term notes.
+  "durable_objects": {
+    "bindings": [{ "name": "MEMORY", "class_name": "Memory" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Memory"] }],
   // Only ai.liljimjim.com (behind Cloudflare Access) should serve the frame.
   // Keep the workers.dev address and preview URLs switched off on every deploy.
   "workers_dev": false,
