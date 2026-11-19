@@ -189,7 +189,15 @@ body.no-captions .captions { visibility: hidden; }
     </label>
     <p class="hint" id="deviceHint"></p>
     <h3>Conversation</h3>
-    <div class="row"><span>Keep listening after each reply</span><input id="keepIn" type="checkbox" checked></div>
+    <label for="stayIn">Keep listening after I'm activated
+      <select id="stayIn">
+        <option value="0">Off (tap for each question)</option>
+        <option value="1">1 minute</option>
+        <option value="5">5 minutes</option>
+        <option value="10">10 minutes</option>
+        <option value="15">15 minutes</option>
+      </select>
+    </label>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
     <div id="memBox" style="display:none;gap:14px">
     <h3>Memory</h3>
@@ -248,7 +256,7 @@ body.no-captions .captions { visibility: hidden; }
   let settings = {
     voice: store.get("voice", ""),
     rate: store.get("rate", 1.05),
-    keep: store.get("keep", true),
+    stay: Number(store.get("stay", 5)),
     captions: store.get("captions", true),
     model: store.get("model", "claude-haiku-5-5"),
     key: store.get("key", ""),
@@ -288,7 +296,7 @@ body.no-captions .captions { visibility: hidden; }
   $("#deviceIn").placeholder = "For example: Studio Mac (detected " + device.kind + ")";
   updatePlace();
   $("#rateIn").value = settings.rate;
-  $("#keepIn").checked = settings.keep;
+  $("#stayIn").value = String(settings.stay);
   $("#capIn").checked = settings.captions;
   $("#modelSel").value = settings.model;
   $("#elModelSel").value = settings.elModel;
@@ -319,6 +327,11 @@ body.no-captions .captions { visibility: hidden; }
     nomic: "Listening isn't available in this browser",
   };
   function setState(s) { state = s; statusEl.textContent = STATUS[s]; }
+  setInterval(() => {
+    if (state !== "listening") return;
+    const left = Math.ceil((sessionUntil - Date.now()) / 60000);
+    statusEl.textContent = left > 0 ? "Listening · " + left + " min left · tap to stop" : "Listening";
+  }, 1000);
 
   let noteTimer = 0;
   function showNote(msg, ms = 5500) {
@@ -383,11 +396,25 @@ body.no-captions .captions { visibility: hidden; }
     if (state !== "listening") return;
     try { rec && rec.stop(); } catch { submitHeard(); }
   }
+  /* conversation window: keep listening through pauses until it runs out */
+  let sessionUntil = 0;
+  function extendSession() { sessionUntil = settings.stay ? Date.now() + settings.stay * 60000 : 0; }
+  function sessionActive() { return sessionUntil > Date.now() && canListen && !document.hidden; }
+  function maybeRelisten() {
+    youEl.textContent = "";
+    if (sessionActive()) {
+      setState("idle");
+      setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 250);
+    } else {
+      sessionUntil = 0;
+      setState("idle");
+    }
+  }
   function submitHeard() {
     if (submitted || state !== "listening") return;
     submitted = true;
     const text = (heard + " " + partial).trim();
-    if (!text) { setState("idle"); youEl.textContent = ""; return; }
+    if (!text) { maybeRelisten(); return; }
     ask(text);
   }
   function startListening(fromGesture) {
@@ -396,7 +423,7 @@ body.no-captions .captions { visibility: hidden; }
     youEl.textContent = "";
     setState("listening");
     clearTimeout(silenceTimer);
-    silenceTimer = setTimeout(() => { if (state === "listening" && !heard && !partial) { try { rec && rec.abort(); } catch {} setState("idle"); } }, 9000);
+    silenceTimer = setTimeout(() => { if (state === "listening" && !heard && !partial) { try { rec && rec.abort(); } catch { maybeRelisten(); } } }, 9000);
     try {
       rec = new SR();
       rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
@@ -410,10 +437,9 @@ body.no-captions .captions { visibility: hidden; }
       };
       rec.onerror = (ev) => {
         if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+          sessionUntil = 0;
           setState("idle");
           showNote("The microphone or speech recognition is blocked. On the iPad, allow both under Settings → Apps → Safari.", 8000);
-        } else if (ev.error === "no-speech") {
-          setState("idle");
         }
       };
       rec.onend = () => { clearTimeout(endTimer); clearTimeout(silenceTimer); if (state === "listening") submitHeard(); };
@@ -492,6 +518,7 @@ body.no-captions .captions { visibility: hidden; }
   }
 
   async function ask(text) {
+    if (sessionUntil) extendSession();
     if (!haveClaude()) { setState("needkey"); sheet.hidden = false; return; }
     const my = ++turn;
     finalizeReply();
@@ -689,8 +716,9 @@ body.no-captions .captions { visibility: hidden; }
     sysSpeaking = 0;
     setState("idle");
     if (testing) { testing = false; return; }
-    if (settings.keep && canListen && !document.hidden) {
-      setTimeout(() => { if (state === "idle") startListening(false); }, 350);
+    if (settings.stay && canListen && !document.hidden) {
+      extendSession();
+      setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 350);
     }
   }
   function stopSpeech() {
@@ -726,7 +754,14 @@ body.no-captions .captions { visibility: hidden; }
     if (state === "needkey") { sheet.hidden = false; $("#keyIn").focus(); return; }
     unlockAudio(); keepAwake();
     sheet.hidden = true;
-    if (state === "listening") { finishListening(); return; }
+    if (state === "listening") {
+      if (heard || partial) { finishListening(); return; }
+      sessionUntil = 0;                       // tap while waiting quietly: stop listening
+      try { rec && rec.abort(); } catch {}
+      setState("idle");
+      return;
+    }
+    extendSession();
     if (state === "speaking" || state === "thinking") interrupt();
     startListening(true);
   }
@@ -779,7 +814,7 @@ body.no-captions .captions { visibility: hidden; }
   });
   $("#voiceSel").addEventListener("change", (e) => { settings.voice = e.target.value; store.set("voice", settings.voice); });
   $("#rateIn").addEventListener("input", (e) => { settings.rate = Number(e.target.value); store.set("rate", settings.rate); });
-  $("#keepIn").addEventListener("change", (e) => { settings.keep = e.target.checked; store.set("keep", settings.keep); });
+  $("#stayIn").addEventListener("change", (e) => { settings.stay = Number(e.target.value); store.set("stay", settings.stay); if (!settings.stay) sessionUntil = 0; else if (sessionUntil) extendSession(); });
   $("#capIn").addEventListener("change", (e) => { settings.captions = e.target.checked; store.set("captions", settings.captions); document.body.classList.toggle("no-captions", !settings.captions); });
   $("#deviceIn").addEventListener("change", (e) => {
     settings.deviceName = e.target.value.trim().slice(0, 40);
