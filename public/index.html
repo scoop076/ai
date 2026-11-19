@@ -851,6 +851,11 @@ body.no-captions .captions { visibility: hidden; }
       card.append(st, asked);
       if (c.spoken && c.status === "ready") { const d = document.createElement("p"); d.className = "dim"; d.textContent = c.spoken; card.appendChild(d); }
       if (c.status === "failed" && c.error) { const d = document.createElement("p"); d.className = "dim"; d.textContent = c.error; card.appendChild(d); }
+      if (c.status === "failed" && c.id === Math.max(...list.filter((x) => x.status === "failed").map((x) => x.id))) {
+        const again = document.createElement("button"); again.type = "button"; again.className = "quiet"; again.textContent = "Try again";
+        again.onclick = () => changeAction("retry", c.id, again);
+        card.appendChild(again);
+      }
       if (c.status === "ready") {
         const pair = document.createElement("div"); pair.className = "pair";
         const ok = document.createElement("button"); ok.type = "button"; ok.textContent = "Approve";
@@ -863,7 +868,7 @@ body.no-captions .captions { visibility: hidden; }
     }
   }
   async function changeAction(kind, id, btn) {
-    btn.disabled = true; btn.textContent = kind === "approve" ? "Publishing..." : "Discarding...";
+    btn.disabled = true; btn.textContent = { approve: "Publishing...", discard: "Discarding...", retry: "Starting..." }[kind];
     try {
       const r = await fetch("/api/changes/" + kind, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
       const res = await r.json();

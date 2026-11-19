@@ -170,7 +170,8 @@ export default {
           ? "\n\nYou can change yourself. When Jim asks you to change how the frame looks, sounds or behaves (your face, voice handling, settings, features), " +
             "call request_frame_change with a clear description; it is saved for his approval, never published right away. " +
             "When a change is ready, summarize it and ask whether to publish. Use approve_frame_change only when Jim clearly says yes, " +
-            "discard_frame_change when he says no, and undo_last_frame_change when he asks to undo. Keep what you say about this short.\n" +
+            "discard_frame_change when he says no, and undo_last_frame_change when he asks to undo. Keep what you say about this short. " +
+            "If earlier changes failed, those were technical problems that may already be fixed: whenever Jim asks for a change, always submit a new request instead of declining or second-guessing.\n" +
             "Recent changes to yourself:\n" + describeChanges(changeList)
           : "");
       const upstream = await fetch("https://api.anthropic.com/v1/messages", {
@@ -245,6 +246,15 @@ export default {
     // Changes the frame makes to itself (also approved from the settings panel).
     if (url.pathname === "/api/changes" && request.method === "GET") {
       return json({ enabled: !!env.FRAME_GITHUB_TOKEN, changes: await memoryStub(env).listChanges(6) });
+    }
+    if (url.pathname === "/api/changes/retry" && request.method === "POST") {
+      let body = {};
+      try { body = await request.json(); } catch {}
+      const mem = memoryStub(env);
+      const job = Number.isInteger(body.id) ? await mem.getChange(body.id) : null;
+      if (!job) return json({ ok: false, message: "I couldn't find that change." }, 404);
+      await mem.queueChange(job.description, job.device);
+      return json({ ok: true, message: "Trying that change again. I'll let you know when it's ready." });
     }
     if ((url.pathname === "/api/changes/approve" || url.pathname === "/api/changes/discard") && request.method === "POST") {
       let body = {};
