@@ -313,7 +313,7 @@ body.no-captions .captions { visibility: hidden; }
   let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0, testing = false;
   let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
   let elSpeaking = false, elFailed = false;
-  let srvClaude = false, srvEleven = false;   // keys held as Cloudflare secrets
+  let srvClaude = false, srvEleven = false, srvMemory = false;   // keys held as Cloudflare secrets
   const haveClaude = () => srvClaude || !!settings.key;
   const haveEleven = () => srvEleven || !!settings.elKey;
 
@@ -343,8 +343,9 @@ body.no-captions .captions { visibility: hidden; }
   async function init() {
     try {
       const r = await fetch("/api/config", { cache: "no-store" });
-      if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; }
+      if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; }
     } catch {}
+    await pullPrefs();
     if (srvClaude) { $("#claudeKeyBox").style.display = "none"; $("#keyHint").textContent = "Your Claude key is stored securely on your Cloudflare server."; }
     if (srvEleven) { $("#elKeyBox").style.display = "none"; }
     fillVoices();
@@ -772,7 +773,41 @@ body.no-captions .captions { visibility: hidden; }
     if (e.key === "Escape") sheet.hidden = true;
   });
 
-  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) loadMemory(); });
+  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); } });
+
+  /* ---------- shared voice settings (same on every screen) ---------- */
+  async function pullPrefs() {
+    if (!srvMemory) return;
+    try {
+      const r = await fetch("/api/prefs", { cache: "no-store" });
+      if (!r.ok) return;
+      const p = await r.json();
+      if (!p.elVoice && settings.elVoice) { pushPrefs(); return; }   // first screen seeds the shared choice
+      if (p.elVoice && p.elVoice !== settings.elVoice) {
+        settings.elVoice = p.elVoice; store.set("elVoice", p.elVoice); elFailed = false;
+        const sel = $("#elVoiceSel");
+        if ([...sel.options].some((o) => o.value === p.elVoice)) sel.value = p.elVoice;
+      }
+      if (p.elModel && p.elModel !== settings.elModel) {
+        settings.elModel = p.elModel; store.set("elModel", p.elModel); $("#elModelSel").value = p.elModel;
+      }
+      if (p.rate && Number(p.rate) !== Number(settings.rate)) {
+        settings.rate = Number(p.rate); store.set("rate", settings.rate); $("#rateIn").value = settings.rate;
+      }
+    } catch {}
+  }
+  function pushPrefs() {
+    if (!srvMemory) return;
+    fetch("/api/prefs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ elVoice: settings.elVoice, elModel: settings.elModel, rate: Number(settings.rate) }),
+    }).catch(() => {});
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) pullPrefs(); });
+  $("#elVoiceSel").addEventListener("change", pushPrefs);
+  $("#elModelSel").addEventListener("change", pushPrefs);
+  $("#rateIn").addEventListener("change", pushPrefs);
 
   /* ---------- memory (kept on your Cloudflare server) ---------- */
   async function loadMemory() {

@@ -158,6 +158,21 @@ export default {
       });
     }
 
+    // Shared settings: the same voice on every screen.
+    if (url.pathname === "/api/prefs" && request.method === "GET") {
+      return json(await memoryStub(env).getPrefs());
+    }
+    if (url.pathname === "/api/prefs" && request.method === "POST") {
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "Bad request." }, 400); }
+      const patch = {};
+      if (typeof body.elVoice === "string" && /^[A-Za-z0-9]{10,40}$/.test(body.elVoice)) patch.elVoice = body.elVoice;
+      if (ELEVEN_MODELS.includes(body.elModel)) patch.elModel = body.elModel;
+      const rate = Number(body.rate);
+      if (rate >= 0.7 && rate <= 1.5) patch.rate = rate;
+      return json(await memoryStub(env).setPrefs(patch));
+    }
+
     // Memory: what the frame remembers, start fresh, or erase everything.
     if (url.pathname === "/api/memory" && request.method === "GET") {
       return json(await memoryStub(env).summary());

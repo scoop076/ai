@@ -55,6 +55,16 @@ export class Memory extends DurableObject {
     this.setValue("notes_updated", Date.now());
   }
 
+  // Settings shared by every screen (the voice and how it sounds).
+  getPrefs() {
+    try { return JSON.parse(this.getValue("prefs") || "{}"); } catch { return {}; }
+  }
+  setPrefs(patch) {
+    const prefs = { ...this.getPrefs(), ...patch };
+    this.setValue("prefs", JSON.stringify(prefs));
+    return prefs;
+  }
+
   summary() {
     const n = this.sql.exec("SELECT COUNT(*) AS n FROM turns").one().n;
     const first = this.sql.exec("SELECT MIN(ts) AS t FROM turns").one().t;
@@ -63,6 +73,6 @@ export class Memory extends DurableObject {
 
   forgetEverything() {
     this.sql.exec("DELETE FROM turns");
-    this.sql.exec("DELETE FROM kv");
+    this.sql.exec("DELETE FROM kv WHERE k != 'prefs'");   // keep the chosen voice
   }
 }
