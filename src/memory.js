@@ -79,6 +79,10 @@ export class Memory extends DurableObject {
   }
 
   /* ---------- changes the frame makes to itself ---------- */
+  // Each step is written into the conversation so Claude remembers it happened.
+  logEvent(text) {
+    this.addTurn("assistant", "(Update about myself) " + text, "frame");
+  }
   async queueChange(description, device) {
     const now = Date.now();
     this.sql.exec(
@@ -117,8 +121,12 @@ export class Memory extends DurableObject {
     this.updateChange(job.id, { status: "working" });
     try {
       await runChange(this.env, job, async (fields) => this.updateChange(job.id, fields));
+      const done = this.getChange(job.id);
+      this.logEvent("Change #" + job.id + " is ready and waiting for Jim's approval: " + done.summary + ". " + (done.spoken || ""));
     } catch (e) {
-      this.updateChange(job.id, { status: "failed", error: String((e && e.message) || e).slice(0, 300) });
+      const msg = String((e && e.message) || e).slice(0, 300);
+      this.updateChange(job.id, { status: "failed", error: msg });
+      this.logEvent("Change #" + job.id + " (" + job.description.slice(0, 120) + ") didn't work: " + msg);
     }
     const more = this.sql.exec("SELECT COUNT(*) AS n FROM changes WHERE status = 'queued'").one().n;
     if (more) await this.ctx.storage.setAlarm(Date.now() + 200);
@@ -133,6 +141,7 @@ export class Memory extends DurableObject {
     try {
       const sha = await mergeChange(this.env, job);
       this.updateChange(job.id, { status: "merged", merge_sha: sha });
+      this.logEvent("Jim approved change #" + job.id + " and it is now published and live on every screen: " + job.summary + ". " + (job.spoken || ""));
       return { ok: true, message: "Published. The frame will refresh itself in about a minute with the change." };
     } catch (e) {
       return { ok: false, message: "I couldn't publish it. " + String((e && e.message) || e).slice(0, 160) };
@@ -144,6 +153,7 @@ export class Memory extends DurableObject {
     if (!job || !["ready", "queued", "failed"].includes(job.status)) return { ok: false, message: "There's no pending change to discard." };
     try { await closeChange(this.env, job); } catch {}
     this.updateChange(job.id, { status: "discarded" });
+    this.logEvent("Change #" + job.id + " was discarded at Jim's request, so nothing changed: " + (job.summary || job.description.slice(0, 120)) + ".");
     return { ok: true, message: "Okay, I've thrown that change away. Nothing on the frame changed." };
   }
 
@@ -153,6 +163,7 @@ export class Memory extends DurableObject {
     try {
       await revertChange(this.env, job);
       this.updateChange(job.id, { status: "undone" });
+      this.logEvent("Change #" + job.id + " was undone at Jim's request. I'm back to how I was before it: " + job.summary + " is no longer in effect.");
       return { ok: true, message: "Undone. The frame will go back to how it was in about a minute." };
     } catch (e) {
       return { ok: false, message: "I couldn't undo it. " + String((e && e.message) || e).slice(0, 160) };

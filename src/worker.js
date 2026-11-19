@@ -57,7 +57,7 @@ const CHANGE_WORDS = {
 function describeChanges(list) {
   if (!list.length) return "No changes have been requested yet.";
   return list.map((c) =>
-    "#" + c.id + " (" + CHANGE_WORDS[c.status] + "): " + c.description.slice(0, 200) +
+    "#" + c.id + " (" + CHANGE_WORDS[c.status] + ", " + when(c.updated) + "): " + c.description.slice(0, 200) +
     (c.summary ? " | Result: " + c.summary : "") + (c.status === "failed" && c.error ? " | Problem: " + c.error : ""),
   ).join("\n");
 }
@@ -172,6 +172,8 @@ export default {
             "When a change is ready, summarize it and ask whether to publish. Use approve_frame_change only when Jim clearly says yes, " +
             "discard_frame_change when he says no, and undo_last_frame_change when he asks to undo. Keep what you say about this short. " +
             "If earlier changes failed, those were technical problems that may already be fixed: whenever Jim asks for a change, always submit a new request instead of declining or second-guessing.\n" +
+            "Changes marked published are already live in the version Jim is using right now. You can't see your own face, but trust this list and acknowledge published changes confidently. " +
+            "Messages marked '(Update about myself)' are records of these changes; never read that label aloud.\n" +
             "Recent changes to yourself:\n" + describeChanges(changeList)
           : "");
       const upstream = await fetch("https://api.anthropic.com/v1/messages", {

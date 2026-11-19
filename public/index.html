@@ -323,7 +323,7 @@ body.no-captions .captions { visibility: hidden; }
   let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
   let elSpeaking = false, elFailed = false;
   let srvClaude = false, srvEleven = false, srvMemory = false, changesEnabled = false;
-  let seenChanges = null, pageSig = null, watchingForUpdate = false, announcing = false;
+  let seenChanges = null, pageSig = null, watchingForUpdate = false, announcing = false, lastPublished = "";
   const loadedAt = Date.now();   // keys held as Cloudflare secrets
   const haveClaude = () => srvClaude || !!settings.key;
   const haveEleven = () => srvEleven || !!settings.elKey;
@@ -352,6 +352,10 @@ body.no-captions .captions { visibility: hidden; }
   }
 
   async function init() {
+    try {
+      const upd = sessionStorage.getItem("frame.updated");
+      if (upd) { sessionStorage.removeItem("frame.updated"); setTimeout(() => showNote("I've been updated. " + upd, 9000), 800); }
+    } catch {}
     try {
       const r = await fetch("/api/config", { cache: "no-store" });
       if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; changesEnabled = !!c.changes; }
@@ -894,7 +898,7 @@ body.no-captions .captions { visibility: hidden; }
       }
       seenChanges = Object.fromEntries(changes.map((c) => [c.id, c.status]));
       const published = changes.filter((c) => (c.status === "merged" || c.status === "undone") && c.updated > loadedAt);
-      if (published.length) watchForUpdate();
+      if (published.length) { lastPublished = (published[0].status === "undone" ? "Undone: " : "Now live: ") + (published[0].summary || published[0].description); watchForUpdate(); }
     } catch {}
   }
   function announce(text) {
@@ -925,6 +929,7 @@ body.no-captions .captions { visibility: hidden; }
       if (!quiet) return;
       clearInterval(timer);
       showNote("Updating to the new version...", 3000);
+      try { if (lastPublished) sessionStorage.setItem("frame.updated", lastPublished); } catch {}
       setTimeout(() => location.reload(), 1200);
     }, 10000);
   }
