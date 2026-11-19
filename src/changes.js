@@ -7,7 +7,7 @@
 // scoop076/ai with Contents and Pull requests set to Read and write.
 
 const API = "https://api.github.com/repos/scoop076/ai";
-const EDITABLE = ["public/index.html", "src/worker.js", "src/memory.js", "src/changes.js"];
+const EDITABLE = ["public/index.html", "src/worker.js", "src/memory.js", "src/changes.js", "src/personas.js"];
 const CODE_MODEL = "claude-sonnet-5-5";
 
 async function gh(env, path, opts = {}) {
@@ -77,7 +77,7 @@ const ENGINEER = [
   "You are the engineer for Claude Frame, a talking portrait web app that hangs on Jim's wall and runs in his browsers.",
   "It is a Cloudflare Worker. public/index.html is the entire front end (HTML, CSS and JavaScript in one file).",
   "src/worker.js relays requests to Claude and ElevenLabs behind Cloudflare Access and stores memory; src/memory.js is the Durable Object that keeps memory, shared settings and the change queue;",
-  "src/changes.js is the code that makes these changes.",
+  "src/changes.js is the code that makes these changes; src/personas.js defines the personalities (characters) the frame can switch into, with their voices and looks.",
   "Make the smallest correct change that does what Jim asked, keeping the existing style, structure and design tokens.",
   "Never put API keys, tokens or secrets in code. Do not break listening, speaking, memory, the settings panel, sign-in, or the change system itself.",
   "The page also runs inside Jim's native iPad and iPhone app, which handles the microphone and sound through the APP / NativeSR / toApp / window.__frameNative bridge in index.html. Keep that bridge and its APP branches working.",

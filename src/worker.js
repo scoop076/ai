@@ -11,6 +11,7 @@
 // without it (for example if Access were ever switched off) are refused.
 
 export { Memory } from "./memory.js";
+import { PERSONAS, PERSONA_IDS, PERSONA_TOOL, personaSystem, personaList } from "./personas.js";
 
 const CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"];
 const NOTES_MODEL = "claude-haiku-5-5";
@@ -183,7 +184,8 @@ export default {
       const mem = memoryStub(env);
       const canChange = !!env.FRAME_GITHUB_TOKEN;
       if (canChange) await mem.checkLive(versionId(env));
-      const [recent, notes, changeList] = await Promise.all([mem.recent(30), mem.getNotes(), canChange ? mem.listChanges(5) : []]);
+      const [recent, notes, changeList, prefs] = await Promise.all([mem.recent(30), mem.getNotes(), canChange ? mem.listChanges(5) : [], mem.getPrefs()]);
+      const persona = PERSONAS[prefs.persona] ? prefs.persona : "claude";
       const system =
         (typeof body.system === "string" ? body.system.slice(0, 6000) : "") +
         "\n\nYour long-term memory of Jim and your past conversations (your own notes):\n" +
@@ -204,7 +206,9 @@ export default {
             "Only say a change failed if its status says failed. Never promise a refresh yourself; the frame refreshes on its own.\n" +
             "Messages marked '(Update about myself)' are records of these changes; never read that label aloud.\n" +
             "Recent changes to yourself:\n" + describeChanges(changeList)
-          : "");
+          : "") +
+        "\n\nYou can switch personalities with set_personality when Jim asks you to become one of your characters, asks who else you can be, or wants regular Claude back." +
+        personaSystem(persona);
       const upstream = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
@@ -213,7 +217,7 @@ export default {
           max_tokens: 900,
           system,
           messages: buildMessages(recent, text, device),
-          tools: [WEB_SEARCH, ...(canChange ? FRAME_TOOLS : [])],
+          tools: [WEB_SEARCH, PERSONA_TOOL, ...(canChange ? FRAME_TOOLS : [])],
           stream: true,
         }),
       });
@@ -254,6 +258,20 @@ export default {
         for (const call of toolCalls) {
           let input = {};
           try { input = call.json ? JSON.parse(call.json) : {}; } catch {}
+          if (call.name === "set_personality") {
+            // Switch first, tell the page (so the new voice and look are ready), then greet in character.
+            const id = PERSONAS[input.personality] ? input.personality : "claude";
+            await mem.setPrefs({ persona: id });
+            const say = (full.trim() ? " " : "") + (id === "claude" ? "Back to my regular self. What's on your mind?" : PERSONAS[id].greeting);
+            full += say;
+            if (heard) {
+              try {
+                await writer.write(new TextEncoder().encode("event: frame\ndata: " + JSON.stringify({ type: "frame_persona", persona: id }) + "\n\n"));
+                await writer.write(new TextEncoder().encode(sseText(say)));
+              } catch { heard = false; }
+            }
+            continue;
+          }
           let result;
           try { result = await runFrameTool(mem, call.name, input, device, versionId(env)); }
           catch (e) { result = { ok: false, message: "Something went wrong with that change: " + String((e && e.message) || e).slice(0, 120) }; }
@@ -306,6 +324,11 @@ export default {
       return json(url.pathname.endsWith("approve") ? await mem.approveChange(id, versionId(env)) : await mem.discardChange(id));
     }
 
+    // The characters the frame can play (looks and voices; no prompts).
+    if (url.pathname === "/api/personas") {
+      return json(personaList());
+    }
+
     // Shared settings: the same voice on every screen.
     if (url.pathname === "/api/prefs" && request.method === "GET") {
       return json(await memoryStub(env).getPrefs());
@@ -318,6 +341,7 @@ export default {
       if (ELEVEN_MODELS.includes(body.elModel)) patch.elModel = body.elModel;
       if (ENGINES.includes(body.engine)) patch.engine = body.engine;
       if (AURA_VOICES.includes(body.auraVoice)) patch.auraVoice = body.auraVoice;
+      if (body.persona === "claude" || PERSONA_IDS.includes(body.persona)) patch.persona = body.persona;
       const rate = Number(body.rate);
       if (rate >= 0.7 && rate <= 1.5) patch.rate = rate;
       return json(await memoryStub(env).setPrefs(patch));

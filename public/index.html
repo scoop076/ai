@@ -169,6 +169,11 @@ body.no-captions .captions { visibility: hidden; }
   </button>
   <div class="sheet" id="sheet" hidden>
     <h2>Frame settings</h2>
+    <h3>Personality</h3>
+    <label for="personaSel">Who's in the frame
+      <select id="personaSel"><option value="claude">Claude (regular)</option></select>
+    </label>
+    <p class="hint" id="personaHint">Each personality has its own way of talking, its own voice and its own look. You can also just say "switch to Ellis" or "back to regular Claude".</p>
     <h3>Voice</h3>
     <label for="engineSel">Voice engine
       <select id="engineSel">
@@ -430,7 +435,9 @@ body.no-captions .captions { visibility: hidden; }
       pollChanges();
       setInterval(pollChanges, 15000);
     }
+    await loadPersonas();
     await pullPrefs();
+    if (srvMemory) setInterval(() => { if (!document.hidden && (state === "idle" || state === "listening")) pullPrefs(); }, 20000);
     updateEngineUI();
     if (srvClaude) { $("#claudeKeyBox").style.display = "none"; $("#keyHint").textContent = "Your Claude key is stored securely on your Cloudflare server."; }
     if (srvEleven) { $("#elKeyBox").style.display = "none"; }
@@ -618,6 +625,7 @@ body.no-captions .captions { visibility: hidden; }
         const line = evt.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
         let data; try { data = JSON.parse(line.slice(5)); } catch { continue; }
+        if (data.type === "frame_persona") { applyPersona(data.persona); continue; }
         if (data.type === "content_block_delta" && data.delta && data.delta.type === "text_delta") { full += data.delta.text; onText(full); }
         else if (data.type === "error") { const e = new Error("stream"); e.status = data.error && data.error.type === "overloaded_error" ? 529 : 500; throw e; }
       }
@@ -764,7 +772,7 @@ body.no-captions .captions { visibility: hidden; }
   }
   function elFetch(text) {
     if (engine() === "aura") {
-      return fetch("/api/tts-free", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speaker: settings.auraVoice }) })
+      return fetch("/api/tts-free", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speaker: auraVoiceNow() }) })
         .then(async (r) => {
           if (!r.ok) { let detail = ""; try { detail = JSON.stringify(await r.json()); } catch {} const e = new Error("aura " + r.status); e.status = r.status; e.detail = detail; e.aura = true; throw e; }
           const ab = await r.arrayBuffer();
@@ -776,8 +784,8 @@ body.no-captions .captions { visibility: hidden; }
     const voice_settings = { stability: 0.45, similarity_boost: 0.8, speed };
     const req = srvEleven
       ? fetch("/api/tts", { method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text, voice_id: settings.elVoice, model_id: settings.elModel, voice_settings }) })
-      : fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(settings.elVoice) + "?output_format=mp3_44100_128", {
+          body: JSON.stringify({ text, voice_id: elVoiceNow(), model_id: settings.elModel, voice_settings }) })
+      : fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(elVoiceNow()) + "?output_format=mp3_44100_128", {
           method: "POST",
           headers: { "xi-api-key": settings.elKey, "content-type": "application/json", accept: "audio/mpeg" },
           body: JSON.stringify({ text, model_id: settings.elModel, voice_settings }),
@@ -848,6 +856,63 @@ body.no-captions .captions { visibility: hidden; }
     else if (e && (e.status === 401 || e.status === 403)) msg = "ElevenLabs didn't accept the key or this voice. Check them in settings.";
     showNote(msg, 8000);
   }
+  /* ---------- personalities: a character's way of talking, voice and look ---------- */
+  let personas = [], persona = "claude", personaEl = null, personaAura = null, elVoiceList = [];
+  const look = { target: null, acc: null, accAmt: 0 };   // what the face is wearing
+  const personaOf = (id) => personas.find((p) => p.id === id) || null;
+  function elVoiceNow() { return personaEl || settings.elVoice; }
+  function auraVoiceNow() { return personaAura || settings.auraVoice; }
+  // Find the character's voice among the ElevenLabs voices on Jim's account.
+  function pickElVoice(p) {
+    if (!p || !elVoiceList.length) return null;
+    const first = (v) => String(v.name || "").split(/[^A-Za-z]/)[0].toLowerCase();
+    for (const want of p.eleven || []) {
+      const v = elVoiceList.find((x) => first(x) === want.toLowerCase());
+      if (v) return v.voice_id;
+    }
+    const h = p.voiceHint || {};
+    let best = null, bestScore = 0;
+    for (const v of elVoiceList) {
+      const l = v.labels || {};
+      let sc = 0;
+      if (h.gender && String(l.gender || "").toLowerCase() === h.gender) sc += 3;
+      if (h.accent && String(l.accent || "").toLowerCase().includes(h.accent)) sc += 2;
+      if (h.age && String(l.age || "").toLowerCase().includes(h.age)) sc += 1;
+      if (sc > bestScore) { best = v; bestScore = sc; }
+    }
+    return best ? best.voice_id : null;
+  }
+  function applyPersona(id, quiet) {
+    const p = personaOf(id);
+    persona = p ? id : "claude";
+    personaEl = p && p.id !== "claude" ? pickElVoice(p) : null;
+    personaAura = p && p.aura ? p.aura : null;
+    look.target = p && p.look ? p.look : null;
+    const sel = $("#personaSel");
+    if (sel && [...sel.options].some((o) => o.value === persona)) sel.value = persona;
+    if (!quiet) elFailed = false;
+  }
+  async function loadPersonas() {
+    if (!srvMemory) return;
+    try {
+      const r = await fetch("/api/personas", { cache: "no-store" });
+      if (!r.ok) return;
+      personas = await r.json();
+      const sel = $("#personaSel");
+      sel.innerHTML = "";
+      for (const p of personas) {
+        const o = document.createElement("option");
+        o.value = p.id; o.textContent = p.id === "claude" ? "Claude (regular)" : p.name + ", " + p.title;
+        sel.appendChild(o);
+      }
+      sel.value = persona;
+    } catch {}
+  }
+  $("#personaSel").addEventListener("change", (e) => {
+    applyPersona(e.target.value);
+    fetch("/api/prefs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ persona }) }).catch(() => {});
+  });
+
   async function loadElVoices() {
     const sel = $("#elVoiceSel"), hint = $("#elHint");
     try {
@@ -856,6 +921,8 @@ body.no-captions .captions { visibility: hidden; }
         : await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": settings.elKey } });
       if (!r.ok) throw Object.assign(new Error("voices " + r.status), { status: r.status });
       const { voices = [] } = await r.json();
+      elVoiceList = voices;
+      if (persona !== "claude") applyPersona(persona, true);
       sel.innerHTML = "";
       for (const v of voices) {
         const o = document.createElement("option");
@@ -976,6 +1043,8 @@ body.no-captions .captions { visibility: hidden; }
       const r = await fetch("/api/prefs", { cache: "no-store" });
       if (!r.ok) return;
       const p = await r.json();
+      const want = p.persona || "claude";
+      if (want !== persona || (want !== "claude" && !look.target)) applyPersona(want, true);
       if (!p.elVoice && settings.elVoice) { pushPrefs(); return; }   // first screen seeds the shared choice
       if (p.elVoice && p.elVoice !== settings.elVoice) {
         settings.elVoice = p.elVoice; store.set("elVoice", p.elVoice); elFailed = false;
@@ -1301,6 +1370,69 @@ body.no-captions .captions { visibility: hidden; }
   const gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 };
   let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, thinkAmt = 0, lastT = 0;
   const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
+  function hexRGB(hex) {
+    const h = String(hex).replace("#", "");
+    const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const baseGlow = hexRGB(C.glow), glowNow = baseGlow.slice();
+  const rgbaA = (c, a) => "rgba(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + "," + a + ")";
+  // Each personality's accessory, drawn around the face.
+  function drawAccessory(acc, cx, cy, R, a) {
+    if (!acc || a < 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+    if (acc === "bowtie") {
+      const by = cy + R * 1.16;
+      ctx.fillStyle = "#3a4d78";
+      for (const s of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(cx, by); ctx.lineTo(cx + s * R * 0.34, by - R * 0.14);
+        ctx.quadraticCurveTo(cx + s * R * 0.4, by, cx + s * R * 0.34, by + R * 0.14); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = "#5670a3";
+      ctx.beginPath(); ctx.ellipse(cx, by, R * 0.07, R * 0.08, 0, 0, TAU); ctx.fill();
+    } else if (acc === "beret") {
+      ctx.translate(cx - R * 0.14, cy - R * 0.96); ctx.rotate(-0.2);
+      ctx.fillStyle = "#4b2a5c";
+      ctx.beginPath(); ctx.ellipse(0, 0, R * 0.72, R * 0.27, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#5e3673";
+      ctx.beginPath(); ctx.ellipse(-R * 0.08, -R * 0.06, R * 0.5, R * 0.15, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#4b2a5c";
+      ctx.beginPath(); ctx.ellipse(R * 0.05, -R * 0.29, R * 0.04, R * 0.07, 0.3, 0, TAU); ctx.fill();
+    } else if (acc === "headphones") {
+      ctx.strokeStyle = "#2b2a30"; ctx.lineWidth = R * 0.08; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(cx, cy - R * 0.02, R * 1.14, Math.PI * 1.06, Math.PI * 1.94); ctx.stroke();
+      for (const s of [-1, 1]) {
+        const x = cx + s * R * 1.07, y = cy + R * 0.02;
+        ctx.fillStyle = "#2b2a30";
+        ctx.beginPath(); ctx.ellipse(x, y, R * 0.14, R * 0.26, 0, 0, TAU); ctx.fill();
+        ctx.fillStyle = "#b8483d";
+        ctx.beginPath(); ctx.ellipse(x + s * R * 0.03, y, R * 0.06, R * 0.17, 0, 0, TAU); ctx.fill();
+      }
+    } else if (acc === "pencil") {
+      ctx.translate(cx + R * 0.86, cy - R * 0.66); ctx.rotate(0.85);
+      const L = R * 0.4, w = R * 0.05;
+      ctx.fillStyle = "#e9b82c"; ctx.fillRect(-L, -w, L * 2, w * 2);
+      ctx.fillStyle = "#c99a1c"; ctx.fillRect(-L, -w * 0.25, L * 2, w * 0.5);
+      ctx.fillStyle = "#e8c9a0";
+      ctx.beginPath(); ctx.moveTo(L, -w); ctx.lineTo(L + R * 0.13, 0); ctx.lineTo(L, w); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#3a3438";
+      ctx.beginPath(); ctx.moveTo(L + R * 0.09, -w * 0.3); ctx.lineTo(L + R * 0.13, 0); ctx.lineTo(L + R * 0.09, w * 0.3); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#a9a9b2"; ctx.fillRect(-L - R * 0.05, -w, R * 0.05, w * 2);
+      ctx.fillStyle = "#e58a98"; ctx.fillRect(-L - R * 0.13, -w, R * 0.08, w * 2);
+    } else if (acc === "glasses") {
+      ctx.strokeStyle = "#6b4a22"; ctx.lineWidth = R * 0.026;
+      const pts = [-1, 1].map((side) => [cx + side * R * 0.34 + gaze.x * R * 0.12, cy - R * 0.06 + gaze.y * R * 0.1]);
+      for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x, y, R * 0.17, 0, TAU); ctx.stroke(); }
+      ctx.beginPath(); ctx.arc((pts[0][0] + pts[1][0]) / 2, pts[0][1] - R * 0.02, R * 0.09, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+      ctx.strokeStyle = "rgba(201,162,92,0.7)"; ctx.lineWidth = R * 0.01;
+      for (const s of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(pts[s < 0 ? 0 : 1][0] + s * R * 0.17, pts[0][1]);
+        ctx.quadraticCurveTo(cx + s * R * 0.95, cy + R * 0.9, cx + s * R * 0.3, cy + R * 1.2); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
 
   function frame(ms) {
     const t = ms / 1000, dt = Math.min(0.05, t - lastT || 0.016); lastT = t;
@@ -1336,9 +1468,14 @@ body.no-captions .captions { visibility: hidden; }
     const cx = W / 2, cy = faceTop + faceH * 0.52, R = Math.max(40, Math.min(W, faceH) * 0.28);
     const breath = Math.sin(t * 1.15) * 0.014 * motion;
 
+    const tg = look.target ? hexRGB(look.target.glow) : baseGlow;
+    for (let i = 0; i < 3; i++) glowNow[i] = ease(glowNow[i], tg[i], 1.6, dt);
+    const wantAcc = look.target ? look.target.acc : null;
+    if (look.acc !== wantAcc) { look.accAmt = ease(look.accAmt, 0, 7, dt); if (look.accAmt < 0.03) look.acc = wantAcc; }
+    else look.accAmt = ease(look.accAmt, wantAcc ? 1 : 0, 3, dt);
     const halo = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R * 2.6);
-    halo.addColorStop(0, rgba(C.glow, 0.2 + 0.08 * listenAmt + 0.1 * mouth));
-    halo.addColorStop(1, rgba(C.glow, 0));
+    halo.addColorStop(0, rgbaA(glowNow, 0.2 + 0.08 * listenAmt + 0.1 * mouth));
+    halo.addColorStop(1, rgbaA(glowNow, 0));
     ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
 
     if (listenAmt > 0.01) {
@@ -1385,6 +1522,8 @@ body.no-captions .captions { visibility: hidden; }
       ctx.fillStyle = rgba(C.eye, open);
       ctx.beginPath(); ctx.ellipse(mx, my, R * (0.1 + 0.03 * mouth), R * (0.025 + 0.11 * mouth), 0, 0, TAU); ctx.fill();
     }
+
+    drawAccessory(look.acc, cx, cy, R, look.accAmt);
 
     if (thinkAmt > 0.01) {
       for (let i = 0; i < 3; i++) {
