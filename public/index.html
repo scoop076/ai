@@ -442,7 +442,7 @@ body.no-captions .captions { visibility: hidden; }
     if (!text) { maybeRelisten(); return; }
     ask(text);
   }
-  function startListening(fromGesture) {
+  function startListening(fromGesture, watchdog) {
     if (!canListen) { setState("nomic"); return; }
     heard = ""; partial = ""; submitted = false;
     youEl.textContent = "";
@@ -463,12 +463,25 @@ body.no-captions .captions { visibility: hidden; }
       rec.onerror = (ev) => {
         if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
           setState("idle");
-          if (!fromGesture) { showNote("I'm updated. Tap my face to keep talking.", 10000); return; }
+          if (!fromGesture) { needTap(); return; }
           sessionUntil = 0;
           showNote("The microphone or speech recognition is blocked. On the iPad, allow both under Settings → Apps → Safari.", 8000);
         }
       };
       rec.onend = () => { clearTimeout(endTimer); clearTimeout(silenceTimer); if (state === "listening") submitHeard(); };
+      if (watchdog) {
+        const mine = rec;
+        let gotAudio = false;
+        rec.onaudiostart = () => { gotAudio = true; };
+        const onres = rec.onresult;
+        rec.onresult = (ev) => { gotAudio = true; onres(ev); };
+        setTimeout(() => {
+          if (gotAudio || rec !== mine || state !== "listening") return;
+          setState("idle");                         // set first so ending quietly doesn't submit
+          try { mine.abort(); } catch {}
+          needTap();
+        }, 3000);
+      }
       rec.start();
     } catch {
       setState("idle");
@@ -953,15 +966,25 @@ body.no-captions .captions { visibility: hidden; }
     try { r = JSON.parse(sessionStorage.getItem("frame.resume") || "null"); sessionStorage.removeItem("frame.resume"); } catch {}
     if (!r || !r.until || r.until < Date.now() || !canListen || !haveClaude()) return;
     sessionUntil = r.until;
-    // Can we make sound without a tap?
+    // Can we really make sound without a tap? The audio clock only moves when it can.
     let soundOk = false;
-    if (haveEleven() && ensureAudio()) {
+    if (ensureAudio()) {
       try { await Promise.race([actx.resume(), new Promise((res) => setTimeout(res, 800))]); } catch {}
-      soundOk = actx.state === "running";
+      const t1 = actx.currentTime;
+      await new Promise((res) => setTimeout(res, 350));
+      soundOk = actx.state === "running" && actx.currentTime > t1;
     }
-    if (soundOk) unlocked = true;
-    if (pendingAnnounce && soundOk) { if (tryAnnounce()) return; }   // speaks, then listens again
-    setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); }, 600);
+    if (!soundOk) { needTap(); return; }
+    unlocked = true;
+    if (pendingAnnounce && tryAnnounce()) return;      // speaks, then listens again
+    setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false, true); }, 600);
+  }
+
+  // Safari needs a tap on a freshly loaded page before it will listen or speak.
+  function needTap() {
+    setState("idle");
+    statusEl.textContent = "Tap my face to keep talking";
+    showNote("I'm updated. Tap my face to keep talking.", 15000);
   }
 
   async function currentVersion() {
