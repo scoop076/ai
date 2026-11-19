@@ -128,7 +128,8 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
 .sheet { overflow-x: hidden; scrollbar-width: none; overscroll-behavior: contain; }
 .sheet::-webkit-scrollbar { display: none; }
 .sheet > *, .sheet label, .sheet #elKeyBox, .sheet #claudeKeyBox { min-width: 0; }
-.sheet select, .sheet input[type=password] { width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0; text-overflow: ellipsis; }
+.sheet input[type=text] { font: inherit; font-size: 16px; color: var(--ink); background: var(--wall); border: 1px solid var(--line); border-radius: 8px; padding: 8px; -webkit-user-select: text; user-select: text; }
+.sheet select, .sheet input[type=password], .sheet input[type=text] { width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0; text-overflow: ellipsis; }
 .sheet .hint { overflow-wrap: anywhere; }
 .sheet button { width: 100%; text-align: center; box-sizing: border-box; }
 .sheet h3 { margin: 6px 0 0; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--glow); }
@@ -181,6 +182,11 @@ body.no-captions .captions { visibility: hidden; }
       <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.05">
     </label>
     <button class="quiet" id="testVoiceBtn" type="button">Hear this voice</button>
+    <h3>This screen</h3>
+    <label for="deviceIn">Name this screen
+      <input id="deviceIn" type="text" placeholder="For example: Studio Mac" autocomplete="off" spellcheck="false" maxlength="40">
+    </label>
+    <p class="hint" id="deviceHint"></p>
     <h3>Conversation</h3>
     <div class="row"><span>Keep listening after each reply</span><input id="keepIn" type="checkbox" checked></div>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
@@ -212,7 +218,7 @@ body.no-captions .captions { visibility: hidden; }
   <div class="foot">
     <div class="placard">
       <span class="name">Claude</span>
-      <span class="medium">Portrait in voice and light · Clubroom prototype, 2026 · standalone</span>
+      <span class="medium" id="placardMedium">Portrait in voice and light</span>
       <span class="status" id="statusText">Getting ready</span>
       <span class="latency" id="latencyText"></span>
     </div>
@@ -241,7 +247,38 @@ body.no-captions .captions { visibility: hidden; }
     elKey: store.get("elKey", ""),
     elVoice: store.get("elVoice", ""),
     elModel: store.get("elModel", "eleven_flash_v2_5"),
+    deviceName: store.get("deviceName", ""),
   };
+
+  /* ---------- where is this screen? ---------- */
+  function detectDevice() {
+    const ua = navigator.userAgent || "";
+    const touch = navigator.maxTouchPoints || 0;
+    let kind = "computer";
+    if (/iPhone/.test(ua)) kind = "iPhone";
+    else if (/iPad/.test(ua) || (/Macintosh/.test(ua) && touch > 1)) kind = "iPad";
+    else if (/Android/.test(ua)) kind = /Mobile/.test(ua) ? "Android phone" : "Android tablet";
+    else if (/Macintosh|Mac OS X/.test(ua)) kind = "Mac";
+    else if (/Windows/.test(ua)) kind = "Windows PC";
+    let app = "a web browser";
+    if (/Edg\//.test(ua)) app = "Edge";
+    else if (/CriOS|Chrome\//.test(ua)) app = "Chrome";
+    else if (/FxiOS|Firefox\//.test(ua)) app = "Firefox";
+    else if (/Safari\//.test(ua)) app = "Safari";
+    let standalone = false;
+    try { standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch {}
+    const how = standalone ? "the home screen app" : app;
+    return { kind, how, label: kind + " (" + how + ")" };
+  }
+  const device = detectDevice();
+  function placeName() { return settings.deviceName || device.kind; }
+  function updatePlace() {
+    $("#placardMedium").textContent = "Portrait in voice and light · " + placeName();
+    $("#deviceHint").textContent = "Detected: " + device.label + ". Claude uses this name to know where you're talking from.";
+  }
+  $("#deviceIn").value = settings.deviceName;
+  $("#deviceIn").placeholder = "For example: Studio Mac (detected " + device.kind + ")";
+  updatePlace();
   $("#rateIn").value = settings.rate;
   $("#keepIn").checked = settings.keep;
   $("#capIn").checked = settings.captions;
@@ -390,6 +427,7 @@ body.no-captions .captions { visibility: hidden; }
       "You can't look up live information such as weather, news, or sports scores. If asked, say so briefly and offer what you do know.",
       "When it fits naturally, you may end with a short question to keep the conversation going.",
       "The current date and time is " + now + ".",
+      "Jim is talking to you right now from " + (settings.deviceName ? "the screen he calls \"" + settings.deviceName + "\", which is " : "") + "a " + device.kind + " using " + device.how + ". The frame can run on several of his screens around the house and on his phone. Use this naturally when it matters, for example if he asks where you are or which screen he's on, but don't announce it otherwise.",
     ].join(" ");
   }
   function buildMessages() {
@@ -694,6 +732,11 @@ body.no-captions .captions { visibility: hidden; }
   $("#rateIn").addEventListener("input", (e) => { settings.rate = Number(e.target.value); store.set("rate", settings.rate); });
   $("#keepIn").addEventListener("change", (e) => { settings.keep = e.target.checked; store.set("keep", settings.keep); });
   $("#capIn").addEventListener("change", (e) => { settings.captions = e.target.checked; store.set("captions", settings.captions); document.body.classList.toggle("no-captions", !settings.captions); });
+  $("#deviceIn").addEventListener("change", (e) => {
+    settings.deviceName = e.target.value.trim().slice(0, 40);
+    store.set("deviceName", settings.deviceName);
+    updatePlace();
+  });
   $("#modelSel").addEventListener("change", (e) => { settings.model = e.target.value; store.set("model", settings.model); });
   $("#elModelSel").addEventListener("change", (e) => { settings.elModel = e.target.value; store.set("elModel", settings.elModel); });
   $("#elVoiceSel").addEventListener("change", (e) => { settings.elVoice = e.target.value; store.set("elVoice", settings.elVoice); elFailed = false; });
