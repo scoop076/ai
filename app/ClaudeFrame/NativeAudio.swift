@@ -46,6 +46,7 @@ final class NativeAudio: NSObject {
 
     private override init() {
         super.init()
+        wasMirroring = isMirroring
         configureSession()
         synth.usesApplicationAudioSession = true
         synth.delegate = synthEvents
@@ -54,6 +55,8 @@ final class NativeAudio: NSObject {
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(interrupted(_:)), name: AVAudioSession.interruptionNotification, object: nil)
         nc.addObserver(self, selector: #selector(mediaReset), name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        nc.addObserver(self, selector: #selector(screensChanged), name: UIScreen.didConnectNotification, object: nil)
+        nc.addObserver(self, selector: #selector(screensChanged), name: UIScreen.didDisconnectNotification, object: nil)
     }
 
     // MARK: - Audio setup
@@ -65,11 +68,14 @@ final class NativeAudio: NSObject {
 
     private func configureSession() {
         sessionReady = true
+        // AirPlay speakers are allowed only while the screen is mirrored (to an Apple TV),
+        // so the voice follows the mirror, then comes back here when mirroring stops.
+        var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetoothA2DP]
+        if isMirroring { options.insert(.allowAirPlay) }
         sessionQueue.async {
             let session = AVAudioSession.sharedInstance()
             do {
-                try session.setCategory(.playAndRecord, mode: .default,
-                                        options: [.defaultToSpeaker, .allowBluetoothA2DP])   // no AirPlay: the voice stays in this room
+                try session.setCategory(.playAndRecord, mode: .default, options: options)
                 try session.setActive(true)
             } catch {
                 print("Claude Frame: audio setup failed: \(error)")
@@ -109,6 +115,19 @@ final class NativeAudio: NSObject {
         DispatchQueue.main.async {
             self.sessionReady = false
             if kind == .began { self.stopAll() } else { self.activate() }
+        }
+    }
+
+    private var isMirroring: Bool { UIScreen.screens.count > 1 }
+    private var wasMirroring = false
+
+    // Mirroring started or stopped: send the voice along with the picture, or bring it home.
+    @objc private func screensChanged() {
+        DispatchQueue.main.async {
+            let now = self.isMirroring
+            guard now != self.wasMirroring else { return }
+            self.wasMirroring = now
+            self.configureSession()
         }
     }
 
