@@ -864,7 +864,8 @@ body.no-captions .captions { visibility: hidden; }
     }
     for (const c of list) {
       const card = document.createElement("div"); card.className = "change";
-      const st = document.createElement("span"); st.className = "st"; st.textContent = "#" + c.id + " · " + (CHANGE_LABEL[c.status] || c.status);
+      const label = c.status === "merged" ? (c.live ? "Live" : "Deploying...") : c.status === "undone" ? (c.live ? "Undone" : "Undoing...") : (CHANGE_LABEL[c.status] || c.status);
+      const st = document.createElement("span"); st.className = "st"; st.textContent = "#" + c.id + " · " + label;
       const asked = document.createElement("p"); asked.textContent = c.summary || c.description;
       card.append(st, asked);
       if (c.spoken && c.status === "ready") { const d = document.createElement("p"); d.className = "dim"; d.textContent = c.spoken; card.appendChild(d); }

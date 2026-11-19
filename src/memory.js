@@ -96,7 +96,19 @@ export class Memory extends DurableObject {
   listChanges(limit = 6) {
     return this.sql
       .exec("SELECT id, ts, updated, description, status, summary, spoken, pr, files, error FROM changes ORDER BY id DESC LIMIT ?", limit)
-      .toArray();
+      .toArray()
+      .map((c) => ({ ...c, live: !!this.getValue("live_" + c.id) }));
+  }
+  // A published (or undone) change is live once a newer version of the frame
+  // than the one that approved it is serving requests.
+  checkLive(currentVersion) {
+    if (!currentVersion) return;
+    const rows = this.sql.exec("SELECT id FROM changes WHERE status IN ('merged', 'undone') ORDER BY id DESC LIMIT 5").toArray();
+    for (const r of rows) {
+      if (this.getValue("live_" + r.id)) continue;
+      const v = this.getValue("version_at_" + r.id);
+      if (v && v !== currentVersion) this.markLive(r.id);
+    }
   }
   getChange(id) {
     const rows = this.sql.exec("SELECT * FROM changes WHERE id = ?", id).toArray();
@@ -143,7 +155,7 @@ export class Memory extends DurableObject {
       : "Change #" + id + " has finished deploying and is now live on screen: " + job.summary + ".");
   }
 
-  async approveChange(id) {
+  async approveChange(id, currentVersion) {
     const job = id ? this.getChange(id) : this.latestWith("ready");
     if (!job || job.status !== "ready") {
       const working = this.latestWith("working") || this.latestWith("queued");
@@ -152,6 +164,7 @@ export class Memory extends DurableObject {
     try {
       const sha = await mergeChange(this.env, job);
       this.updateChange(job.id, { status: "merged", merge_sha: sha });
+      if (currentVersion) this.setValue("version_at_" + job.id, currentVersion);
       this.logEvent("Jim approved change #" + job.id + " and it is now published and live on every screen: " + job.summary + ". " + (job.spoken || ""));
       return { ok: true, message: "Approved. It's deploying now, and I'll tell you the moment it's live, usually in about a minute." };
     } catch (e) {
@@ -168,12 +181,14 @@ export class Memory extends DurableObject {
     return { ok: true, message: "Okay, I've thrown that change away. Nothing on the frame changed." };
   }
 
-  async undoLastChange() {
+  async undoLastChange(currentVersion) {
     const job = this.latestWith("merged");
     if (!job) return { ok: false, message: "There's no published change to undo." };
     try {
       await revertChange(this.env, job);
       this.updateChange(job.id, { status: "undone" });
+      this.sql.exec("DELETE FROM kv WHERE k = ?", "live_" + job.id);
+      if (currentVersion) this.setValue("version_at_" + job.id, currentVersion);
       this.logEvent("Change #" + job.id + " was undone at Jim's request. I'm back to how I was before it: " + job.summary + " is no longer in effect.");
       return { ok: true, message: "Okay, undoing it. I'll tell you when I'm back to how I was, usually in about a minute." };
     } catch (e) {

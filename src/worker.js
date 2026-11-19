@@ -54,14 +54,22 @@ const CHANGE_WORDS = {
   queued: "waiting to start", working: "being worked on now", ready: "ready for Jim's approval",
   failed: "failed", merged: "published", discarded: "discarded", undone: "undone",
 };
+function changeState(c) {
+  const mins = Math.max(0, Math.round((Date.now() - c.updated) / 60000));
+  if (c.status === "merged") return c.live
+    ? "published and confirmed live on screen"
+    : "approved " + (mins ? mins + " min ago" : "just now") + " and still deploying; deploys usually take one to two minutes, so it is on its way, not failed";
+  if (c.status === "undone") return c.live ? "undone, and the undo is confirmed live" : "undo approved " + (mins ? mins + " min ago" : "just now") + " and still deploying";
+  return CHANGE_WORDS[c.status];
+}
 function describeChanges(list) {
   if (!list.length) return "No changes have been requested yet.";
   return list.map((c) =>
-    "#" + c.id + " (" + CHANGE_WORDS[c.status] + ", " + when(c.updated) + "): " + c.description.slice(0, 200) +
+    "#" + c.id + " (" + changeState(c) + ", " + when(c.updated) + "): " + c.description.slice(0, 200) +
     (c.summary ? " | Result: " + c.summary : "") + (c.status === "failed" && c.error ? " | Problem: " + c.error : ""),
   ).join("\n");
 }
-async function runFrameTool(mem, name, input, device) {
+async function runFrameTool(mem, name, input, device, version) {
   if (name === "request_frame_change") {
     const desc = String((input && input.description) || "").trim();
     if (!desc) return { ok: false, message: "I didn't catch what you'd like changed. Could you say it again?" };
@@ -69,14 +77,18 @@ async function runFrameTool(mem, name, input, device) {
     return { ok: true, message: "Got it. I'm working on that change now. It usually takes a minute or two, and I'll let you know when it's ready for your approval." };
   }
   const id = input && Number.isInteger(input.change_id) ? input.change_id : undefined;
-  if (name === "approve_frame_change") return await mem.approveChange(id);
+  if (name === "approve_frame_change") return await mem.approveChange(id, version);
   if (name === "discard_frame_change") return await mem.discardChange(id);
-  if (name === "undo_last_frame_change") return await mem.undoLastChange();
+  if (name === "undo_last_frame_change") return await mem.undoLastChange(version);
   return { ok: false, message: "" };
 }
 function sseText(text) {
   return "event: content_block_delta\ndata: " +
     JSON.stringify({ type: "content_block_delta", index: 99, delta: { type: "text_delta", text } }) + "\n\n";
+}
+
+function versionId(env) {
+  return (env.CF_VERSION_METADATA && env.CF_VERSION_METADATA.id) || null;
 }
 
 function memoryStub(env) {
@@ -159,6 +171,7 @@ export default {
       if (!text) return json({ error: "Nothing to send." }, 400);
       const mem = memoryStub(env);
       const canChange = !!env.FRAME_GITHUB_TOKEN;
+      if (canChange) await mem.checkLive(versionId(env));
       const [recent, notes, changeList] = await Promise.all([mem.recent(30), mem.getNotes(), canChange ? mem.listChanges(5) : []]);
       const system =
         (typeof body.system === "string" ? body.system.slice(0, 6000) : "") +
@@ -172,7 +185,9 @@ export default {
             "When a change is ready, summarize it and ask whether to publish. Use approve_frame_change only when Jim clearly says yes, " +
             "discard_frame_change when he says no, and undo_last_frame_change when he asks to undo. Keep what you say about this short. " +
             "If earlier changes failed, those were technical problems that may already be fixed: whenever Jim asks for a change, always submit a new request instead of declining or second-guessing.\n" +
-            "Changes marked published are already live in the version Jim is using right now. You can't see your own face, but trust this list and acknowledge published changes confidently. " +
+            "This list is the truth about your changes; you can't see your own face, so rely on it. A change confirmed live is on screen now: say so confidently. " +
+            "A change that is still deploying is on its way: tell Jim it's still deploying and that you'll announce it when it's live; don't apologize or call it failed. " +
+            "Only say a change failed if its status says failed. Never promise a refresh yourself; the frame refreshes on its own.\n" +
             "Messages marked '(Update about myself)' are records of these changes; never read that label aloud.\n" +
             "Recent changes to yourself:\n" + describeChanges(changeList)
           : "");
@@ -226,7 +241,7 @@ export default {
           let input = {};
           try { input = call.json ? JSON.parse(call.json) : {}; } catch {}
           let result;
-          try { result = await runFrameTool(mem, call.name, input, device); }
+          try { result = await runFrameTool(mem, call.name, input, device, versionId(env)); }
           catch (e) { result = { ok: false, message: "Something went wrong with that change: " + String((e && e.message) || e).slice(0, 120) }; }
           if (result.message && (!full.trim() || !result.ok)) {
             const say = (full.trim() ? " " : "") + result.message;
@@ -247,10 +262,12 @@ export default {
 
     // Changes the frame makes to itself (also approved from the settings panel).
     if (url.pathname === "/api/changes" && request.method === "GET") {
-      return json({ enabled: !!env.FRAME_GITHUB_TOKEN, changes: await memoryStub(env).listChanges(6) });
+      const mem = memoryStub(env);
+      await mem.checkLive(versionId(env));
+      return json({ enabled: !!env.FRAME_GITHUB_TOKEN, changes: await mem.listChanges(6) });
     }
     if (url.pathname === "/api/version") {
-      return json({ id: (env.CF_VERSION_METADATA && env.CF_VERSION_METADATA.id) || null });
+      return json({ id: versionId(env) });
     }
     if (url.pathname === "/api/changes/live" && request.method === "POST") {
       let body = {};
@@ -272,7 +289,7 @@ export default {
       try { body = await request.json(); } catch {}
       const id = Number.isInteger(body.id) ? body.id : undefined;
       const mem = memoryStub(env);
-      return json(url.pathname.endsWith("approve") ? await mem.approveChange(id) : await mem.discardChange(id));
+      return json(url.pathname.endsWith("approve") ? await mem.approveChange(id, versionId(env)) : await mem.discardChange(id));
     }
 
     // Shared settings: the same voice on every screen.
