@@ -916,9 +916,8 @@ body.no-captions .captions { visibility: hidden; }
   // Say news about a change out loud, then listen for Jim's answer.
   let pendingAnnounce = "";
   function announce(text) {
-    showNote(text, 12000);
     pendingAnnounce = text;
-    tryAnnounce();
+    if (!tryAnnounce()) showNote(text, 12000);   // shown only if it can't be said out loud yet
   }
   function tryAnnounce() {
     if (!pendingAnnounce || !unlocked) return false;   // audio not allowed yet: say it on the next tap
@@ -929,6 +928,7 @@ body.no-captions .captions { visibility: hidden; }
     if (state !== "idle") return false;                // mid-conversation: say it when this turn ends
     const text = pendingAnnounce;
     pendingAnnounce = "";
+    note.hidden = true;                                // the caption carries it now
     announcing = true; t0 = 0; streamDone = true; queued = 0;
     claudeEl.textContent = text;
     setState("speaking");
