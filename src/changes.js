@@ -84,7 +84,7 @@ const ENGINEER = [
 ].join(" ");
 
 async function askForEdits(env, request, listing, previousError) {
-  let content = "Jim's request (spoken aloud, so it may be loosely worded):\n\"" + request + "\"\n\nCurrent files:\n\n" + listing;
+  let content = "Call the submit_changes tool with your edits. Jim's request (spoken aloud, so it may be loosely worded):\n\"" + request + "\"\n\nCurrent files:\n\n" + listing;
   if (previousError) content += "\n\nYour previous edits could not be applied: " + previousError + "\nTry again with exact, unique 'old' text copied from the files above.";
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -94,14 +94,18 @@ async function askForEdits(env, request, listing, previousError) {
       max_tokens: 16000,
       system: ENGINEER,
       tools: [EDIT_TOOL],
-      tool_choice: { type: "tool", name: "submit_changes" },
+      tool_choice: { type: "auto" },
       messages: [{ role: "user", content }],
     }),
   });
-  if (!r.ok) throw new Error("Claude couldn't work on it (status " + r.status + ").");
+  if (!r.ok) {
+    let detail = "";
+    try { const j = await r.json(); detail = (j.error && j.error.message) || ""; } catch {}
+    throw new Error("Claude couldn't work on it (status " + r.status + (detail ? ": " + detail.slice(0, 200) : "") + ").");
+  }
   const data = await r.json();
   const call = (data.content || []).find((b) => b.type === "tool_use");
-  if (!call) throw new Error("Claude didn't return any edits.");
+  if (!call) return { edits: [] };          // no edits this time; the caller retries once
   return call.input || {};
 }
 
@@ -139,7 +143,7 @@ export async function runChange(env, job, update) {
     problem = applyEdits(files, result.edits);
     if (!problem) break;
   }
-  if (problem) throw new Error("The edits didn't fit the code (" + problem + ").");
+  if (problem) throw new Error(problem === "no edits were given" ? "Claude didn't come up with any edits for that." : "The edits didn't fit the code (" + problem + ").");
   const changed = Object.entries(files).filter(([, f]) => f.next !== undefined && f.next !== f.text);
   if (!changed.length) throw new Error("Nothing needed to change.");
 

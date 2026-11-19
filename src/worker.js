@@ -186,7 +186,9 @@ export default {
         }),
       });
       if (!upstream.ok || !upstream.body) {
-        return new Response(upstream.body, { status: upstream.status, headers: { "content-type": "application/json" } });
+        let detail = "";
+        try { const j = await upstream.json(); detail = (j.error && j.error.message) || ""; } catch {}
+        return json({ error: detail || "Claude returned status " + upstream.status }, upstream.status);
       }
       await mem.addTurn("user", text, device);
 

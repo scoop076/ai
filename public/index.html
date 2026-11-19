@@ -496,7 +496,7 @@ body.no-captions .captions { visibility: hidden; }
     if (st === 429) return "Too many requests or the spending limit was reached. Wait a moment, or check your limits in the Claude Console.";
     if (st === 529 || st === 503) return "Claude is busy right now. Try again in a moment.";
     if (err && err.name === "TypeError") return srvClaude ? "Couldn't reach Claude. If you've been away a while, reload the page to sign in again." : "Couldn't reach Claude. Check the Wi-Fi connection.";
-    return "Claude didn't answer that time. Tap the face to try again.";
+    return "Claude didn't answer that time" + (err && err.status ? " (error " + err.status + (err.detail ? ": " + String(err.detail).slice(0, 160) : "") + ")" : "") + ". Tap the face to try again.";
   }
 
   async function streamClaude(messages, signal, onText) {
@@ -513,7 +513,11 @@ body.no-captions .captions { visibility: hidden; }
         ? JSON.stringify({ model: settings.model, system: rules(), text: messages[messages.length - 1].content, device: placeName() })
         : JSON.stringify({ model: settings.model, max_tokens: 500, system: rules(), messages, stream: true }),
     });
-    if (!res.ok) { const e = new Error("http " + res.status); e.status = res.status; throw e; }
+    if (!res.ok) {
+      const e = new Error("http " + res.status); e.status = res.status;
+      try { const j = await res.json(); e.detail = j.error && (j.error.message || j.error); } catch {}
+      throw e;
+    }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "", full = "";
