@@ -164,6 +164,20 @@ body.no-captions .captions { visibility: hidden; }
   <div class="sheet" id="sheet" hidden>
     <h2>Frame settings</h2>
     <h3>Voice</h3>
+    <label for="engineSel">Voice engine
+      <select id="engineSel">
+        <option value="eleven">ElevenLabs (most lifelike, uses credits)</option>
+        <option value="aura">Cloudflare Aura (natural, free daily allowance)</option>
+        <option value="device">This device's voice (free)</option>
+      </select>
+    </label>
+    <div id="auraBox" style="display:none;gap:14px">
+    <label for="auraVoiceSel">Free voice
+      <select id="auraVoiceSel"></select>
+    </label>
+    <p class="hint">Free each day up to Cloudflare's allowance (roughly a dozen or more replies). After that, this device's voice takes over until tomorrow.</p>
+    </div>
+    <div id="elevenBox" style="display:grid;gap:14px">
     <div id="elKeyBox" style="display:grid;gap:14px">
     <label for="elKeyIn">ElevenLabs API key
       <input id="elKeyIn" type="password" placeholder="Paste your ElevenLabs key" autocomplete="off" spellcheck="false">
@@ -180,7 +194,8 @@ body.no-captions .captions { visibility: hidden; }
       </select>
     </label>
     <p class="hint" id="elHint">With an ElevenLabs key, Claude speaks in a lifelike voice. Without one, the browser's own voice is used.</p>
-    <label for="voiceSel">Backup voice (this browser)
+    </div>
+    <label for="voiceSel">This device's voice (also the backup)
       <select id="voiceSel"></select>
     </label>
     <label for="rateIn">Speaking speed
@@ -267,6 +282,8 @@ body.no-captions .captions { visibility: hidden; }
     elKey: store.get("elKey", ""),
     elVoice: store.get("elVoice", ""),
     elModel: store.get("elModel", "eleven_flash_v2_5"),
+    engine: store.get("engine", ""),
+    auraVoice: store.get("auraVoice", "luna"),
     deviceName: store.get("deviceName", ""),
   };
 
@@ -317,7 +334,7 @@ body.no-captions .captions { visibility: hidden; }
   let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0, testing = false;
   let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
   let elSpeaking = false, elFailed = false;
-  let srvClaude = false, srvEleven = false, srvMemory = false, changesEnabled = false;
+  let srvClaude = false, srvEleven = false, srvMemory = false, changesEnabled = false, srvAura = false, auraFailedAt = 0;
   let seenChanges = null, pageSig = null, watchingForUpdate = false, announcing = false, lastPublished = null;
   let versionAtLoad = null, reloadAfterSpeech = false;
   const loadedAt = Date.now();   // keys held as Cloudflare secrets
@@ -360,7 +377,7 @@ body.no-captions .captions { visibility: hidden; }
     } catch {}
     try {
       const r = await fetch("/api/config", { cache: "no-store" });
-      if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; changesEnabled = !!c.changes; }
+      if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; changesEnabled = !!c.changes; srvAura = !!c.aura; }
     } catch {}
     if (changesEnabled) {
       pageSignature().then((sig) => { pageSig = sig; }).catch(() => {});
@@ -369,6 +386,7 @@ body.no-captions .captions { visibility: hidden; }
       setInterval(pollChanges, 15000);
     }
     await pullPrefs();
+    updateEngineUI();
     if (srvClaude) { $("#claudeKeyBox").style.display = "none"; $("#keyHint").textContent = "Your Claude key is stored securely on your Cloudflare server."; }
     if (srvEleven) { $("#elKeyBox").style.display = "none"; }
     fillVoices();
@@ -625,11 +643,35 @@ body.no-captions .captions { visibility: hidden; }
     return s.replace(/[*_#`>~]/g, "").replace(/\[(.*?)\]\(.*?\)/g, "$1")
       .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "").replace(/\s+/g, " ").trim();
   }
-  function useEleven() { return !!(haveEleven() && settings.elVoice && !elFailed && ensureAudio()); }
+  /* which voice speaks: ElevenLabs, the free Aura voice, or this device's own */
+  const AURA_VOICES = ["luna", "thalia", "andromeda", "helena", "aurora", "athena", "asteria", "cora", "delia", "iris", "juno", "minerva", "ophelia", "phoebe", "theia", "vesta", "amalthea", "callista", "cordelia", "electra", "harmonia", "hera", "pandora",
+    "apollo", "orion", "arcas", "aries", "atlas", "draco", "hermes", "hyperion", "janus", "jupiter", "mars", "neptune", "odysseus", "orpheus", "pluto", "saturn", "zeus"];
+  function engine() {
+    if (settings.engine === "device") return "device";
+    if (settings.engine === "aura") return srvAura ? "aura" : "device";
+    if (settings.engine === "eleven") return haveEleven() ? "eleven" : (srvAura ? "aura" : "device");
+    return haveEleven() ? "eleven" : (srvAura ? "aura" : "device");
+  }
+  function cloudEngine() { return engine() !== "device"; }
+  function useCloud() {
+    const en = engine();
+    if (en === "eleven") return !!(settings.elVoice && !elFailed && ensureAudio());
+    if (en === "aura") return !!(Date.now() - auraFailedAt > 3600000 && ensureAudio());   // retry hourly after a limit
+    return false;
+  }
+  function updateEngineUI() {
+    const en = engine();
+    $("#engineSel").value = settings.engine || en;
+    $("#auraBox").style.display = en === "aura" ? "grid" : "none";
+    $("#elevenBox").style.display = en === "eleven" || (!haveEleven() && settings.engine === "eleven") ? "grid" : "none";
+    const sel = $("#auraVoiceSel");
+    if (!sel.options.length) for (const v of AURA_VOICES) { const o = document.createElement("option"); o.value = v; o.textContent = v[0].toUpperCase() + v.slice(1); sel.appendChild(o); }
+    sel.value = settings.auraVoice;
+  }
   function speakChunk(raw) {
     const text = clean(raw);
     if (!text) return;
-    if (useEleven()) { speakEleven(text); return; }
+    if (useCloud()) { speakEleven(text); return; }
     speakSystem(text);
   }
   function speakSystem(text) {
@@ -659,6 +701,14 @@ body.no-captions .captions { visibility: hidden; }
     return actx;
   }
   function elFetch(text) {
+    if (engine() === "aura") {
+      return fetch("/api/tts-free", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, speaker: settings.auraVoice }) })
+        .then(async (r) => {
+          if (!r.ok) { let detail = ""; try { detail = JSON.stringify(await r.json()); } catch {} const e = new Error("aura " + r.status); e.status = r.status; e.detail = detail; e.aura = true; throw e; }
+          const ab = await r.arrayBuffer();
+          return await new Promise((res, rej) => actx.decodeAudioData(ab, res, rej));
+        });
+    }
     const speed = Math.min(1.2, Math.max(0.7, Number(settings.rate)));
     const voice_settings = { stability: 0.45, similarity_boost: 0.8, speed };
     const req = srvEleven
@@ -711,6 +761,13 @@ body.no-captions .captions { visibility: hidden; }
     });
   }
   function elProblem(e) {
+    if (e && e.aura) {
+      auraFailedAt = Date.now();
+      showNote(e.status === 429
+        ? "Today's free voice allowance is used up, so this device's voice is speaking. The free voice comes back tomorrow."
+        : "The free voice isn't available right now, so this device's voice is speaking.", 8000);
+      return;
+    }
     elFailed = true;
     const d = (e && e.detail) || "";
     let msg = "Couldn't reach ElevenLabs, so the backup voice is speaking for now.";
@@ -795,7 +852,7 @@ body.no-captions .captions { visibility: hidden; }
     // With the ElevenLabs voice, waking the audio engine is enough. Skip the
     // silent browser-speech trick: on iPad it grabs the audio system and the
     // microphone starts deaf on the same tap.
-    if (haveEleven()) { ensureAudio(); unlocked = true; return; }
+    if (cloudEngine()) { ensureAudio(); unlocked = true; return; }
     if (unlocked || !("speechSynthesis" in window)) return;
     unlocked = true;
     try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch {}
@@ -822,7 +879,7 @@ body.no-captions .captions { visibility: hidden; }
     if (pendingAnnounce && tryAnnounce()) { extendSession(); return; }
     startListening(true);
   }
-  stage.addEventListener("pointerdown", (e) => { if (e.target.closest(".gear, .sheet")) return; if (haveEleven()) ensureAudio(); }, { passive: true });
+  stage.addEventListener("pointerdown", (e) => { if (e.target.closest(".gear, .sheet")) return; if (cloudEngine()) ensureAudio(); }, { passive: true });
   stage.addEventListener("click", (e) => { if (e.target.closest(".gear, .sheet")) return; onTalk(); });
   stage.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === stage) { e.preventDefault(); onTalk(); } });
   document.addEventListener("keydown", (e) => {
@@ -848,6 +905,9 @@ body.no-captions .captions { visibility: hidden; }
       if (p.elModel && p.elModel !== settings.elModel) {
         settings.elModel = p.elModel; store.set("elModel", p.elModel); $("#elModelSel").value = p.elModel;
       }
+      if (p.engine && p.engine !== settings.engine) { settings.engine = p.engine; store.set("engine", p.engine); }
+      if (p.auraVoice && p.auraVoice !== settings.auraVoice) { settings.auraVoice = p.auraVoice; store.set("auraVoice", p.auraVoice); }
+      updateEngineUI();
       if (p.rate && Number(p.rate) !== Number(settings.rate)) {
         settings.rate = Number(p.rate); store.set("rate", settings.rate); $("#rateIn").value = settings.rate;
       }
@@ -858,11 +918,19 @@ body.no-captions .captions { visibility: hidden; }
     fetch("/api/prefs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ elVoice: settings.elVoice, elModel: settings.elModel, rate: Number(settings.rate) }),
+      body: JSON.stringify({ elVoice: settings.elVoice, elModel: settings.elModel, rate: Number(settings.rate), engine: settings.engine || undefined, auraVoice: settings.auraVoice }),
     }).catch(() => {});
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden) pullPrefs(); });
   $("#elVoiceSel").addEventListener("change", pushPrefs);
+  $("#engineSel").addEventListener("change", (e) => {
+    settings.engine = e.target.value; store.set("engine", settings.engine);
+    elFailed = false; auraFailedAt = 0;
+    updateEngineUI(); pushPrefs();
+  });
+  $("#auraVoiceSel").addEventListener("change", (e) => {
+    settings.auraVoice = e.target.value; store.set("auraVoice", settings.auraVoice); auraFailedAt = 0; pushPrefs();
+  });
   $("#elModelSel").addEventListener("change", pushPrefs);
   $("#rateIn").addEventListener("change", pushPrefs);
 

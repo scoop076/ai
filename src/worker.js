@@ -15,6 +15,9 @@ export { Memory } from "./memory.js";
 const CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"];
 const NOTES_MODEL = "claude-haiku-5-5";
 const ELEVEN_MODELS = ["eleven_flash_v2_5", "eleven_multilingual_v2"];
+const AURA_MODEL = "@cf/deepgram/aura-2-en";
+const AURA_VOICES = ["amalthea", "andromeda", "apollo", "arcas", "aries", "asteria", "athena", "atlas", "aurora", "callista", "cora", "cordelia", "delia", "draco", "electra", "harmonia", "helena", "hera", "hermes", "hyperion", "iris", "janus", "juno", "jupiter", "luna", "mars", "minerva", "neptune", "odysseus", "ophelia", "orion", "orpheus", "pandora", "phoebe", "pluto", "saturn", "thalia", "theia", "vesta", "zeus"];
+const ENGINES = ["eleven", "aura", "device"];
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -165,7 +168,7 @@ export default {
 
     // Which keys does the server hold?
     if (url.pathname === "/api/config") {
-      return json({ claude: !!env.ANTHROPIC_API_KEY, eleven: !!env.ELEVENLABS_API_KEY, memory: !!env.MEMORY, changes: !!env.FRAME_GITHUB_TOKEN, search: true });
+      return json({ claude: !!env.ANTHROPIC_API_KEY, eleven: !!env.ELEVENLABS_API_KEY, memory: !!env.MEMORY, changes: !!env.FRAME_GITHUB_TOKEN, search: true, aura: !!env.AI });
     }
 
     // Chat with memory: builds the conversation from saved history and notes,
@@ -313,6 +316,8 @@ export default {
       const patch = {};
       if (typeof body.elVoice === "string" && /^[A-Za-z0-9]{10,40}$/.test(body.elVoice)) patch.elVoice = body.elVoice;
       if (ELEVEN_MODELS.includes(body.elModel)) patch.elModel = body.elModel;
+      if (ENGINES.includes(body.engine)) patch.engine = body.engine;
+      if (AURA_VOICES.includes(body.auraVoice)) patch.auraVoice = body.auraVoice;
       const rate = Number(body.rate);
       if (rate >= 0.7 && rate <= 1.5) patch.rate = rate;
       return json(await memoryStub(env).setPrefs(patch));
@@ -388,6 +393,29 @@ export default {
           "cache-control": "no-store",
         },
       });
+    }
+
+    // Free voice: Deepgram Aura on Cloudflare Workers AI (free daily allowance)
+    if (url.pathname === "/api/tts-free" && request.method === "POST") {
+      if (!env.AI) return json({ error: "Workers AI isn't connected." }, 503);
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "Bad request." }, 400); }
+      const text = String(body.text || "").slice(0, 1200);
+      const speaker = AURA_VOICES.includes(body.speaker) ? body.speaker : "luna";
+      if (!text) return json({ error: "Missing text." }, 400);
+      let out;
+      try { out = await env.AI.run(AURA_MODEL, { text, speaker, encoding: "mp3" }); }
+      catch (e) {
+        const msg = String((e && e.message) || e);
+        return json({ error: msg.slice(0, 200) }, /limit|neuron|quota|exceed|capacity/i.test(msg) ? 429 : 502);
+      }
+      let audio = out;
+      if (out && !(out instanceof ReadableStream) && out.audio) {           // some models return base64
+        const bin = atob(out.audio); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        audio = bytes;
+      }
+      return new Response(audio, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
     }
 
     // ElevenLabs: the account's voices
