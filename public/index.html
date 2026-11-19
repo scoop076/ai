@@ -124,6 +124,13 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
   max-height: calc(100% - 80px); overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
 .sheet h2 { margin: 0; font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 1.15rem; }
+[hidden] { display: none !important; }
+.sheet { overflow-x: hidden; scrollbar-width: none; overscroll-behavior: contain; }
+.sheet::-webkit-scrollbar { display: none; }
+.sheet > *, .sheet label, .sheet #elKeyBox, .sheet #claudeKeyBox { min-width: 0; }
+.sheet select, .sheet input[type=password] { width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0; text-overflow: ellipsis; }
+.sheet .hint { overflow-wrap: anywhere; }
+.sheet button { width: 100%; text-align: center; box-sizing: border-box; }
 .sheet h3 { margin: 6px 0 0; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--glow); }
 .sheet .pair { display: flex; gap: 8px; }
 .sheet .pair button { flex: 1; }
