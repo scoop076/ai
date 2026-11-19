@@ -58,19 +58,30 @@ final class NativeAudio: NSObject {
 
     // MARK: - Audio setup
 
+    // Setting up the device's audio can take a moment, so it's done off the main
+    // thread (keeping the screen responsive) and only when actually needed.
+    private let sessionQueue = DispatchQueue(label: "claudeframe.audiosession", qos: .userInitiated)
+    private var sessionReady = false
+
     private func configureSession() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .default,
-                                    options: [.defaultToSpeaker, .allowBluetoothA2DP, .allowAirPlay])
-            try session.setActive(true)
-        } catch {
-            print("Claude Frame: audio setup failed: \(error)")
+        sessionReady = true
+        sessionQueue.async {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playAndRecord, mode: .default,
+                                        options: [.defaultToSpeaker, .allowBluetoothA2DP, .allowAirPlay])
+                try session.setActive(true)
+            } catch {
+                print("Claude Frame: audio setup failed: \(error)")
+            }
         }
     }
 
-    func activate() {
-        try? AVAudioSession.sharedInstance().setActive(true)
+    /// Make sure the audio is on. Cheap when it already is.
+    func activate(force: Bool = false) {
+        if sessionReady && !force { return }
+        sessionReady = true
+        sessionQueue.async { try? AVAudioSession.sharedInstance().setActive(true) }
     }
 
     func stopAll() {
@@ -87,6 +98,7 @@ final class NativeAudio: NSObject {
         guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let kind = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         DispatchQueue.main.async {
+            self.sessionReady = false
             if kind == .began { self.stopAll() } else { self.activate() }
         }
     }

@@ -23,7 +23,7 @@ struct ClaudeFrameApp: App {
         .onChange(of: phase) { _, now in
             // Keep the screen awake while the frame is showing.
             UIApplication.shared.isIdleTimerDisabled = (now == .active)
-            if now == .active { NativeAudio.shared.activate() } else { NativeAudio.shared.stopAll() }
+            if now == .active { NativeAudio.shared.activate(force: true) } else { NativeAudio.shared.stopAll() }
         }
     }
 }
