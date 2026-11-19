@@ -69,7 +69,7 @@ final class NativeAudio: NSObject {
             let session = AVAudioSession.sharedInstance()
             do {
                 try session.setCategory(.playAndRecord, mode: .default,
-                                        options: [.defaultToSpeaker, .allowBluetoothA2DP, .allowAirPlay])
+                                        options: [.defaultToSpeaker, .allowBluetoothA2DP])   // no AirPlay: the voice stays in this room
                 try session.setActive(true)
             } catch {
                 print("Claude Frame: audio setup failed: \(error)")
