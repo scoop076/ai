@@ -80,6 +80,7 @@ const ENGINEER = [
   "src/changes.js is the code that makes these changes.",
   "Make the smallest correct change that does what Jim asked, keeping the existing style, structure and design tokens.",
   "Never put API keys, tokens or secrets in code. Do not break listening, speaking, memory, the settings panel, sign-in, or the change system itself.",
+  "The page also runs inside Jim's native iPad and iPhone app, which handles the microphone and sound through the APP / NativeSR / toApp / window.__frameNative bridge in index.html. Keep that bridge and its APP branches working.",
   "Each edit is an exact search and replace: 'old' must match the current file text exactly, including spaces, and appear exactly once.",
 ].join(" ");
 
