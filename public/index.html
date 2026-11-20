@@ -474,7 +474,19 @@ body.no-captions .captions { visibility: hidden; }
     if (!haveClaude()) { setState("needkey"); sheet.hidden = false; claudeEl.textContent = "Hello, Jim. Add your Claude API key in settings to wake me up."; return; }
     if (!canListen) { setState("nomic"); return; }
     setState("idle");
+    const resuming = (() => { try { return !!sessionStorage.getItem("frame.resume"); } catch { return false; } })();
     resumeAfterReload();
+    if (!resuming) setTimeout(autoListen, 900);   // the app starts listening as soon as it opens
+  }
+  /* In the app, opening it (or coming back to it) starts listening right away, as if the face were tapped.
+     When the conversation window runs out, Mibo goes back to waiting for "Hey Mibo". */
+  function autoListen() {
+    if (!APP || !canListen || !haveClaude() || document.hidden || state !== "idle" || !sheet.hidden) return;
+    unlocked = true;
+    disarmWake();
+    extendSession();
+    if (pendingAnnounce && tryAnnounce()) return;   // say "I've been updated" first, then listen
+    startListening(false);
   }
 
   /* ---------- voices ---------- */
@@ -1259,7 +1271,7 @@ body.no-captions .captions { visibility: hidden; }
       body: JSON.stringify({ elVoice: settings.elVoice, elModel: settings.elModel, rate: Number(settings.rate), engine: settings.engine || undefined, auraVoice: settings.auraVoice }),
     }).catch(() => {});
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { pullPrefs(); if (state === "idle") setTimeout(armWake, 600); } else if (APP) wakeArmed = false; else disarmWake(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { pullPrefs(); if (state === "idle") setTimeout(APP ? autoListen : armWake, 600); } else if (APP) { wakeArmed = false; sessionUntil = 0; } else disarmWake(); });
   $("#elVoiceSel").addEventListener("change", pushPrefs);
   $("#engineSel").addEventListener("change", (e) => {
     settings.engine = e.target.value; store.set("engine", settings.engine);
