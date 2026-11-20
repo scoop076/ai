@@ -690,6 +690,7 @@ body.no-captions .captions { visibility: hidden; }
       setTimeout(() => { if (state === "idle" && sessionActive()) startListening(false); else if (state === "idle") setState("idle"); }, 250);
     } else {
       sessionUntil = 0;
+      clearCaptions();                        // the conversation is over; wait for "Hey Mibo" with a clean screen
       setState("idle");
     }
   }
@@ -838,7 +839,7 @@ body.no-captions .captions { visibility: hidden; }
     sessionUntil = 0;
     submitted = true;
     clearTimeout(endTimer); clearTimeout(silenceTimer);
-    heard = ""; partial = ""; youEl.textContent = ""; claudeEl.textContent = "";
+    heard = ""; partial = ""; clearCaptions();
     setState("idle");                         // this also arms the wake phrase
     try { rec && rec.abort(); } catch {}
     showNote("Going quiet. Say \u201cHey Mibo\u201d when you need me.", 4000);
@@ -1288,6 +1289,13 @@ body.no-captions .captions { visibility: hidden; }
     if (ctl) ctl.abort();
     stopSpeech();
     finalizeReply();
+    clearInterval(karaokeTimer);
+    claudeEl.textContent = "";                // stopped mid-reply: the half-said sentence goes away
+  }
+  // Mibo has gone quiet (stopped, told to be silent, or the conversation ended): clear the captions.
+  function clearCaptions() {
+    clearInterval(karaokeTimer);
+    youEl.textContent = ""; claudeEl.textContent = "";
   }
 
   /* ---------- gestures ---------- */
@@ -1317,7 +1325,7 @@ body.no-captions .captions { visibility: hidden; }
       sessionUntil = 0;
       submitted = true;                       // don't send whatever was half-heard
       clearTimeout(endTimer); clearTimeout(silenceTimer);
-      heard = ""; partial = ""; youEl.textContent = "";
+      heard = ""; partial = ""; clearCaptions();
       setState("idle");                       // set first so ending quietly doesn't submit; this also arms the wake phrase
       try { rec && rec.abort(); } catch {}
       return;
