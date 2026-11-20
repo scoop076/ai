@@ -360,6 +360,7 @@ body.no-captions .captions { visibility: hidden; }
      mute. In a normal browser none of this runs. */
   const APP = (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.frame) || null;
   let nativeLevel = 0, nativeVoices = [], nativeSeq = 0;
+  let kokoro = { status: "off", progress: 0 };   // Mibo's built-in voice in the app
   const playWaiters = {}, sayCbs = {}, listeners = {};
   function toApp(msg) { try { APP.postMessage(msg); } catch {} }
   function toBase64(ab) {
@@ -390,6 +391,7 @@ body.no-captions .captions { visibility: hidden; }
     else if (e.type === "spoke") { const c = sayCbs[e.id]; delete sayCbs[e.id]; if (c) c.end(); }
     else if (e.type === "wake") onWake(e.id, e.text || "");
     else if (e.type === "voices") { nativeVoices = e.voices || []; try { fillVoices(); } catch {} }
+    else if (e.type === "kokoro") { kokoro = { status: e.status || "off", progress: Number(e.progress) || 0 }; try { showVoiceInUse(); } catch {} }
   };
   if (APP) setTimeout(() => toApp({ type: "hello" }), 0);
 
@@ -525,9 +527,20 @@ body.no-captions .captions { visibility: hidden; }
     }
     return list.slice().sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
   }
+  // Each character's voice in Mibo's built-in (Kokoro) voice, used by the app once it's downloaded.
+  function kokoroVoiceNow() {
+    const p = personaOf(persona);
+    return (p && p.kokoro) || "af_heart";
+  }
   function showVoiceInUse() {
     const v = currentVoice(), el = $("#voiceNow");
-    if (el) el.textContent = v ? "Speaking with: " + v.name + (voiceTier(v.name) ? "" : ". For a more natural sound, download the Premium version in Settings → Accessibility → Read & Speak → Voices.") : "";
+    if (!el) return;
+    const apple = v ? v.name : "this device's voice";
+    if (APP && kokoro.status === "ready") { el.textContent = "Speaking with Mibo's built-in voice (" + kokoroVoiceNow() + "), the same on every device."; return; }
+    if (APP && kokoro.status === "downloading") { el.textContent = "Downloading Mibo's built-in voice: " + Math.round(kokoro.progress * 100) + "%. Using " + apple + " until it's ready."; return; }
+    if (APP && kokoro.status === "loading") { el.textContent = "Getting Mibo's built-in voice ready. Using " + apple + " for now."; return; }
+    if (APP && kokoro.status === "failed") { el.textContent = "Mibo's built-in voice didn't download, so Mibo is using " + apple + ". It tries again each time the app opens."; return; }
+    el.textContent = v ? "Speaking with: " + v.name + (voiceTier(v.name) ? "" : ". For a more natural sound, download the Premium version in Settings → Accessibility → Read & Speak → Voices.") : "";
   }
 
   /* ---------- listening (Safari speech recognition) ---------- */
@@ -909,7 +922,7 @@ body.no-captions .captions { visibility: hidden; }
         start: () => { sysSpeaking = 1; markAudioStart(); },
         end: () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); },
       };
-      toApp({ type: "say", id, text, voice: v ? v.name : "", rate: Number(settings.rate) });
+      toApp({ type: "say", id, text, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), rate: Number(settings.rate) });
       return;
     }
     if (!("speechSynthesis" in window)) return;

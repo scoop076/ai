@@ -52,6 +52,10 @@ final class NativeAudio: NSObject {
         synth.delegate = synthEvents
         synthEvents.onEvent = { [weak self] event in self?.send(event) }
         loadVoices()
+        let kokoro = KokoroVoice.shared
+        kokoro.onEvent = { [weak self] event in self?.send(event) }
+        kokoro.onStatus = { [weak self] in self?.sendKokoroStatus() }
+        kokoro.start()
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(interrupted(_:)), name: AVAudioSession.interruptionNotification, object: nil)
         nc.addObserver(self, selector: #selector(mediaReset), name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
@@ -94,6 +98,7 @@ final class NativeAudio: NSObject {
 
     /// Make sure the audio is on. Cheap when it already is.
     func activate(force: Bool = false) {
+        KokoroVoice.shared.start()   // retries a failed voice download when the app comes back
         if sessionReady && !force { return }
         sessionReady = true
         sessionQueue.async { try? AVAudioSession.sharedInstance().setActive(true) }
@@ -107,6 +112,13 @@ final class NativeAudio: NSObject {
         }
         stopPlayback()
         synth.stopSpeaking(at: .immediate)
+        KokoroVoice.shared.stop()
+    }
+
+    /// Tell the page how Mibo's built-in voice is doing (for the settings screen).
+    private func sendKokoroStatus() {
+        let k = KokoroVoice.shared
+        send(["type": "kokoro", "status": k.status, "progress": k.progress])
     }
 
     @objc private func interrupted(_ note: Notification) {
@@ -150,6 +162,7 @@ final class NativeAudio: NSObject {
         switch type {
         case "hello":
             send(["type": "voices", "voices": voices])
+            sendKokoroStatus()
         case "listen":
             startListening(id: id, lang: m["lang"] as? String ?? "en-US")
         case "stopListening":
@@ -162,9 +175,11 @@ final class NativeAudio: NSObject {
             stopPlayback()
         case "say":
             let rate = (m["rate"] as? NSNumber)?.floatValue ?? 1
-            say(id: id, text: m["text"] as? String ?? "", voice: m["voice"] as? String ?? "", rate: rate)
+            say(id: id, text: m["text"] as? String ?? "", voice: m["voice"] as? String ?? "", rate: rate,
+                kokoroVoice: m["kokoro"] as? String ?? "")
         case "stopSay":
             synth.stopSpeaking(at: .immediate)
+            KokoroVoice.shared.stop()
         case "wakeOn":
             wakeOn(names: m["names"] as? [String] ?? ["mibo"])
         case "wakeOff":
@@ -307,7 +322,7 @@ final class NativeAudio: NSObject {
     }
 
     private func startWake() {
-        guard wakeWanted, listenId == nil, player == nil, !synth.isSpeaking else { return }
+        guard wakeWanted, listenId == nil, player == nil, !synth.isSpeaking, !KokoroVoice.shared.isSpeaking else { return }
         wakeCount += 1
         let id = "w\(wakeCount)"
         listenId = id
@@ -487,7 +502,14 @@ final class NativeAudio: NSObject {
         voices = list
     }
 
-    private func say(id: String, text: String, voice: String, rate: Float) {
+    private func say(id: String, text: String, voice: String, rate: Float, kokoroVoice: String) {
+        // Mibo's built-in voice when it's ready; Apple's voice until then.
+        if KokoroVoice.shared.isReady, !kokoroVoice.isEmpty {
+            pauseWake()
+            let token = KokoroVoice.shared.token   // if speech is stopped before the audio wakes, skip this sentence
+            whenActive { KokoroVoice.shared.speak(id: id, text: text, voice: kokoroVoice, token: token) }
+            return
+        }
         let u = AVSpeechUtterance(string: text)
         if let ident = voiceIds[voice], let v = AVSpeechSynthesisVoice(identifier: ident) {
             u.voice = v

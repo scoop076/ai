@@ -32,3 +32,20 @@ it last a year and allows TestFlight installs without a cable.
 - Tap the face to talk, as in the browser.
 - Pull down on the frame to reload it.
 - The screen stays awake while the app is open.
+
+## Mibo's built-in voice
+
+The app speaks with Kokoro, an open voice model (Apache 2.0) that runs on the
+device through Google's MediaPipe, so Mibo sounds the same on every iPhone and
+iPad and works offline.
+
+- The first time Xcode opens the project it fetches the MediaPipe package
+  (File → Packages → Resolve Package Versions if it doesn't start on its own).
+- The first time the app opens, it downloads the voice model (about 295 MB)
+  in the background. Use Wi-Fi. Until it's done, Mibo uses Apple's voices.
+  Settings shows the download progress.
+- Each character's Kokoro voice is set in `src/personas.js` (`kokoro:`);
+  regular Mibo uses `af_heart`.
+- If the MediaPipe package is missing, the app still builds and simply keeps
+  using Apple's voices.
+

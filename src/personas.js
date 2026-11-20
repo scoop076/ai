@@ -7,6 +7,7 @@
 // eleven  - preferred ElevenLabs voice names, in order (matched against Jim's account)
 // voiceHint - used when none of those names exist: {gender, accent, age}
 // aura    - free Cloudflare Aura voice for this character
+// kokoro  - Mibo's built-in voice in the app (a Kokoro voice ID)
 // apple   - Apple device voices to use, best first (the Premium version of each is used when downloaded)
 // look    - halo color and the accessory the face wears
 
@@ -18,6 +19,7 @@ export const PERSONAS = {
     eleven: ["George", "Daniel", "Harry"],
     voiceHint: { gender: "male", accent: "british" },
     apple: ["Jamie", "Daniel", "Arthur", "Oliver"],
+    kokoro: "bm_george",
     aura: "draco",
     look: { glow: "#9fb6d8", acc: "bowtie" },
     prompt: [
@@ -38,6 +40,7 @@ export const PERSONAS = {
     eleven: ["Charlotte", "Matilda", "Laura", "Alice"],
     voiceHint: { gender: "female" },
     apple: ["Serena", "Joelle", "Zoe"],
+    kokoro: "bf_emma",
     aura: "harmonia",
     look: { glow: "#c79be0", acc: "beret" },
     prompt: [
@@ -58,6 +61,7 @@ export const PERSONAS = {
     eleven: ["Brian", "Bill", "Chris"],
     voiceHint: { gender: "male", accent: "american", age: "middle" },
     apple: ["Evan", "Nathan", "Tom"],
+    kokoro: "am_michael",
     aura: "zeus",
     look: { glow: "#e0786a", acc: "headphones" },
     prompt: [
@@ -78,6 +82,7 @@ export const PERSONAS = {
     eleven: ["Bill", "Clyde", "Roger", "Eric"],
     voiceHint: { gender: "male", accent: "american", age: "old" },
     apple: ["Tom", "Nathan", "Evan"],
+    kokoro: "am_fenrir",
     aura: "arcas",
     look: { glow: "#d9b45a", acc: "pencil" },
     prompt: [
@@ -98,6 +103,7 @@ export const PERSONAS = {
     eleven: ["Jessica", "Sarah", "Laura", "Lily"],
     voiceHint: { gender: "female", accent: "american" },
     apple: ["Zoe", "Noelle", "Joelle"],
+    kokoro: "af_bella",
     aura: "thalia",
     look: { glow: "#f2b45c", acc: "glasses" },
     prompt: [
@@ -133,7 +139,7 @@ export function personaList() {
   return [{ id: "claude", name: "Mibo", title: "Regular Mibo" }].concat(
     PERSONA_IDS.map((id) => {
       const p = PERSONAS[id];
-      return { id, name: p.name, title: p.title, eleven: p.eleven, voiceHint: p.voiceHint, aura: p.aura, apple: p.apple, look: p.look };
+      return { id, name: p.name, title: p.title, eleven: p.eleven, voiceHint: p.voiceHint, aura: p.aura, apple: p.apple, kokoro: p.kokoro, look: p.look };
     }),
   );
 }
