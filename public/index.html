@@ -429,6 +429,16 @@ body.no-captions .captions { visibility: hidden; }
     if (s === "idle") setTimeout(armWake, 400); else disarmWake();
     reportState();
   }
+  // Send the captions (Jim's words as he speaks, and Mibo's reply) to the app, so the phone
+  // can show them while Mibo is on the TV. Checked a few times a second; sent only when they change.
+  let sentYou = null, sentMibo = null;
+  if (APP) setInterval(() => {
+    const you = youEl.textContent || "", mibo = claudeEl.textContent || "";
+    if (you === sentYou && mibo === sentMibo) return;
+    sentYou = you; sentMibo = mibo;
+    toApp({ type: "captions", you, mibo });
+  }, 250);
+
   // Tell the app what Mibo is doing, so the phone can show it while Mibo is on the TV.
   let reported = "";
   function reportState() {
