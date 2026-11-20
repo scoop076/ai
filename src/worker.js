@@ -35,6 +35,33 @@ const WEB_SEARCH = {
   user_location: { type: "approximate", city: "Collinsville", region: "Illinois", country: "US", timezone: "America/Chicago" },
 };
 
+// The permanent "About Jim" list: Mibo adds and removes facts itself.
+const MEMORY_TOOLS = [
+  {
+    name: "remember_about_jim",
+    description: "Save a lasting fact to your permanent 'About Jim' list, which you always see and never lose. Use it whenever Jim tells you " +
+      "something about himself or his life that will still matter later (where he lives, family and pets, his home and rooms, work, health " +
+      "routines he shares, tastes, plans, people he mentions), and always when he says 'remember'. One short, self-contained fact per call " +
+      "(call it several times for several facts). If a fact replaces an old one, call forget_about_jim for the old one first. " +
+      "Don't save what's already on the list, small talk, or your own suggestions.",
+    input_schema: {
+      type: "object",
+      properties: { fact: { type: "string", description: "The fact, written as a complete sentence about Jim, for example 'Jim's wife is a teacher in Illinois.'" } },
+      required: ["fact"],
+    },
+  },
+  {
+    name: "forget_about_jim",
+    description: "Remove facts from the 'About Jim' list when Jim asks you to forget something, or when a fact is out of date. " +
+      "Every fact containing all of the given words is removed.",
+    input_schema: {
+      type: "object",
+      properties: { about: { type: "string", description: "A few distinctive words from the fact(s) to remove, for example 'old address Edwardsville'." } },
+      required: ["about"],
+    },
+  },
+];
+
 // Tools that let Claude change the frame itself when Jim asks out loud.
 const FRAME_TOOLS = [
   {
@@ -184,10 +211,15 @@ export default {
       const mem = memoryStub(env);
       const canChange = !!env.FRAME_GITHUB_TOKEN;
       if (canChange) await mem.checkLive(versionId(env));
-      const [recent, notes, changeList, prefs] = await Promise.all([mem.recent(30), mem.getNotes(), canChange ? mem.listChanges(5) : [], mem.getPrefs()]);
+      const [recent, notes, changeList, prefs, facts] = await Promise.all([mem.recent(30), mem.getNotes(), canChange ? mem.listChanges(5) : [], mem.getPrefs(), mem.listFacts()]);
       const persona = PERSONAS[prefs.persona] ? prefs.persona : "claude";
       const system =
         (typeof body.system === "string" ? body.system.slice(0, 6000) : "") +
+        "\n\nAbout Jim (your permanent list; these are true unless he corrects them):\n" +
+        (facts.length ? facts.map((f) => "- " + f.text).join("\n") : "(Nothing yet.)") +
+        "\nUse these naturally. For weather, the time, nearby places and other local questions, assume Jim means his home unless he says " +
+        "otherwise, and never ask where he lives. When he tells you something new about himself that will still matter later, save it " +
+        "with remember_about_jim (briefly confirm, like 'Got it.'); when he asks you to forget something, use forget_about_jim." +
         "\n\nYour long-term memory of Jim and your past conversations (your own notes):\n" +
         (notes || "(Nothing yet. This may be one of your first conversations.)") +
         "\n\nThe conversation below may span several of Jim's screens and earlier sessions. Jim's messages start with the time and screen in brackets; " +
@@ -220,7 +252,7 @@ export default {
           max_tokens: 900,
           system,
           messages: buildMessages(recent, text, device),
-          tools: [WEB_SEARCH, PERSONA_TOOL, ...(canChange ? FRAME_TOOLS : [])],
+          tools: [WEB_SEARCH, PERSONA_TOOL, ...MEMORY_TOOLS, ...(canChange ? FRAME_TOOLS : [])],
           stream: true,
         }),
       });
@@ -261,6 +293,22 @@ export default {
         for (const call of toolCalls) {
           let input = {};
           try { input = call.json ? JSON.parse(call.json) : {}; } catch {}
+          if (call.name === "remember_about_jim" || call.name === "forget_about_jim") {
+            let say = "";
+            if (call.name === "remember_about_jim") {
+              const added = await mem.addFact(input.fact);
+              if (!full.trim()) say = added ? "Got it, I'll remember that." : "I already have that.";
+            } else {
+              const gone = await mem.removeFacts(input.about);
+              if (!full.trim() || !gone.length) say = gone.length ? "Done, I've forgotten that." : "I didn't have anything saved about that.";
+            }
+            if (say) {
+              say = (full.trim() ? " " : "") + say;
+              full += say;
+              if (heard) { try { await writer.write(new TextEncoder().encode(sseText(say))); } catch { heard = false; } }
+            }
+            continue;
+          }
           if (call.name === "set_personality") {
             // Switch first, tell the page (so the new voice and look are ready), then greet in character.
             const id = PERSONAS[input.personality] ? input.personality : "claude";

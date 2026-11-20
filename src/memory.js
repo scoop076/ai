@@ -11,6 +11,14 @@ export class Memory extends DurableObject {
       "CREATE TABLE IF NOT EXISTS turns (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, device TEXT NOT NULL DEFAULT '')",
     );
     this.sql.exec("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
+    // The permanent "About Jim" list: facts that are never trimmed or rewritten, only added or removed on request.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, text TEXT NOT NULL)");
+    if (!this.getValue("facts_seeded")) {
+      this.setValue("facts_seeded", "1");
+      if (this.sql.exec("SELECT COUNT(*) AS n FROM facts").one().n === 0) {
+        this.addFact("Jim lives in Collinsville, Illinois (ZIP 62234), in the St. Louis metro area. Use this for weather, local places and anything \"near me\".");
+      }
+    }
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS changes (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, updated INTEGER NOT NULL, " +
       "description TEXT NOT NULL, device TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', " +
@@ -54,6 +62,28 @@ export class Memory extends DurableObject {
     this.setValue("context_from", Date.now());
   }
 
+  /* ---------- the permanent "About Jim" list ---------- */
+  listFacts() {
+    return this.sql.exec("SELECT id, text FROM facts ORDER BY id").toArray();
+  }
+  addFact(text) {
+    const t = String(text || "").trim().slice(0, 300);
+    if (!t) return false;
+    const same = this.sql.exec("SELECT id FROM facts WHERE lower(text) = lower(?)", t).toArray();
+    if (same.length) return false;
+    if (this.sql.exec("SELECT COUNT(*) AS n FROM facts").one().n >= 200) return false;
+    this.sql.exec("INSERT INTO facts (ts, text) VALUES (?, ?)", Date.now(), t);
+    return true;
+  }
+  // Remove every fact that mentions the given words (case-insensitive). Returns what was removed.
+  removeFacts(about) {
+    const words = String(about || "").toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+    if (!words.length) return [];
+    const gone = this.listFacts().filter((f) => words.every((w) => f.text.toLowerCase().includes(w)));
+    for (const f of gone) this.sql.exec("DELETE FROM facts WHERE id = ?", f.id);
+    return gone.map((f) => f.text);
+  }
+
   getNotes() {
     return this.getValue("notes") || "";
   }
@@ -75,7 +105,7 @@ export class Memory extends DurableObject {
   summary() {
     const n = this.sql.exec("SELECT COUNT(*) AS n FROM turns").one().n;
     const first = this.sql.exec("SELECT MIN(ts) AS t FROM turns").one().t;
-    return { messages: n, since: first || null, notes: this.getNotes() };
+    return { messages: n, since: first || null, notes: this.getNotes(), facts: this.listFacts().map((f) => f.text) };
   }
 
   /* ---------- changes the frame makes to itself ---------- */
@@ -198,6 +228,7 @@ export class Memory extends DurableObject {
 
   forgetEverything() {
     this.sql.exec("DELETE FROM turns");
-    this.sql.exec("DELETE FROM kv WHERE k != 'prefs'");   // keep the chosen voice
+    this.sql.exec("DELETE FROM facts");
+    this.sql.exec("DELETE FROM kv WHERE k != 'prefs' AND k != 'facts_seeded'");   // keep the chosen voice; don't re-add the starter fact
   }
 }
