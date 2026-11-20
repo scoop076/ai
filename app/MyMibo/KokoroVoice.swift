@@ -200,13 +200,22 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
             await previous?.value                     // make sentences in order
             guard let self, self.generation == gen else { return }
             var gotAudio = false
+            var seconds = 0.0, firstSound = 0.0
+            let began = Date()
             self.markBusy()
             defer { self.markDone() }
             do {
                 for try await chunk in tts.synthesizeStream(text, options: SynthesisOptions(voiceId: voice)) {
                     guard self.generation == gen else { return }
-                    if self.enqueue(chunk.samples, rate: chunk.sampleRateHz, id: id, gen: gen) { gotAudio = true }
+                    let samples = KokoroVoice.trimSilence(chunk.samples)
+                    if firstSound == 0 { firstSound = Date().timeIntervalSince(began) }
+                    seconds += Double(samples.count) / 24000
+                    if self.enqueue(samples, rate: chunk.sampleRateHz, id: id, gen: gen) { gotAudio = true }
                 }
+                // How fast the voice is working: making speech slower than it plays causes gaps.
+                let took = Date().timeIntervalSince(began)
+                print(String(format: "My Mibo voice: %.1f s of speech made in %.1f s (first sound after %.1f s) — %@",
+                             seconds, took, firstSound, took > seconds ? "TOO SLOW, gaps likely" : "keeping up"))
             } catch {
                 guard self.generation == gen else { return }
                 print("My Mibo: couldn't speak a sentence: \(error)")
@@ -222,6 +231,17 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     private var pending: [String: Int] = [:]   // buffers of each sentence still to play
     private var ended = Set<String>()           // sentences whose audio is all made
     private var started = Set<String>()         // sentences the page was told have started
+
+    /// Kokoro pads each clip with silence at both ends, which adds up to long pauses between
+    /// sentences. Cut it down to a short, natural-sounding pause: a little before, a bit more after.
+    static func trimSilence(_ samples: [Float]) -> [Float] {
+        let quiet: Float = 0.01                 // about -40 dB
+        guard let first = samples.firstIndex(where: { abs($0) > quiet }),
+              let last = samples.lastIndex(where: { abs($0) > quiet }) else { return [] }
+        let start = max(0, first - 24000 * 40 / 1000)                // keep 40 ms before
+        let end = min(samples.count, last + 1 + 24000 * 140 / 1000) // keep 140 ms after
+        return Array(samples[start..<end])
+    }
 
     /// Queue one phrase of audio. Returns false if it couldn't be played.
     private func enqueue(_ samples: [Float], rate: Int, id: String, gen: Int) -> Bool {
