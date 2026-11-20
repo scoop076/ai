@@ -1520,17 +1520,6 @@ body.no-captions .captions { visibility: hidden; }
   const gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 };
   let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, thinkAmt = 0, lastT = 0;
   const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
-  let eyeH = 0.34, caretAmt = 0, happyUntil = 0, prevState = "";
-  const posePreview = new URLSearchParams(location.search).get("pose");   // ?pose=sleep|think|happy|awake to preview an expression
-  function pill(x, y, w, h) {   // a rounded bar centered on x, y
-    const r = Math.min(w, h) / 2;
-    ctx.beginPath();
-    ctx.moveTo(x - w / 2 + r, y - h / 2); ctx.lineTo(x + w / 2 - r, y - h / 2);
-    ctx.arc(x + w / 2 - r, y - h / 2 + r, r, -Math.PI / 2, 0); ctx.lineTo(x + w / 2, y + h / 2 - r);
-    ctx.arc(x + w / 2 - r, y + h / 2 - r, r, 0, Math.PI / 2); ctx.lineTo(x - w / 2 + r, y + h / 2);
-    ctx.arc(x - w / 2 + r, y + h / 2 - r, r, Math.PI / 2, Math.PI); ctx.lineTo(x - w / 2, y - h / 2 + r);
-    ctx.arc(x - w / 2 + r, y - h / 2 + r, r, Math.PI, Math.PI * 1.5); ctx.closePath(); ctx.fill();
-  }
   function hexRGB(hex) {
     const h = String(hex).replace("#", "");
     const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
@@ -1663,42 +1652,28 @@ body.no-captions .captions { visibility: hidden; }
       }
     }
 
-    /* Robot screen eyes: simple rounded bars that change shape with what Claude is doing.
-       awake: tall bars that blink and glance around   listening: a little taller
-       thinking: flat dashes looking up                 just finished talking: happy ^ ^
-       asleep (waiting for "Hey Claude"): thin closed lines */
-    const pose = posePreview || (state === "thinking" ? "think"
-      : (state === "idle" && wakeArmed && !speakingNow) ? "sleep"
-      : (t < happyUntil && !speakingNow) ? "happy" : "awake");
-    if (prevState === "speaking" && state !== "speaking" && state !== "thinking") happyUntil = t + 1.4;
-    prevState = state;
-    const want = {
-      h: pose === "sleep" ? 0.035 : pose === "think" ? 0.07 : pose === "happy" ? 0.2 : 0.34 * (1 + 0.1 * listenAmt),
-      caret: pose === "happy" ? 1 : 0,
-    };
-    eyeH = ease(eyeH, want.h, 9, dt); caretAmt = ease(caretAmt, want.caret, 10, dt);
-    const ew = R * 0.13, eh = Math.max(R * 0.03, R * eyeH * (pose === "sleep" ? 1 : lid));
-    ctx.fillStyle = C.eye; ctx.strokeStyle = C.eye;
+    const ew = R * 0.14, eh = R * 0.24 * lid * (1 + 0.12 * listenAmt);
     for (const side of [-1, 1]) {
       const x = cx + side * R * 0.34 + gaze.x * R * 0.12;
-      const y = cy - R * 0.1 + gaze.y * R * 0.1 - (pose === "sleep" ? -R * 0.06 : 0);
-      if (caretAmt < 0.99) {
-        ctx.globalAlpha = 1 - caretAmt;
-        pill(x, y, ew, eh);
+      const y = cy - R * 0.1 + gaze.y * R * 0.1;
+      ctx.fillStyle = C.eye;
+      ctx.beginPath(); ctx.ellipse(x, y, ew / 2, Math.max(1.5, eh / 2), 0, 0, TAU); ctx.fill();
+      if (lid > 0.4) {
+        ctx.fillStyle = "rgba(255,244,236,0.85)";
+        ctx.beginPath(); ctx.arc(x - ew * 0.18, y - eh * 0.2, ew * 0.17, 0, TAU); ctx.fill();
       }
-      if (caretAmt > 0.01) {
-        ctx.globalAlpha = caretAmt;
-        ctx.lineWidth = R * 0.055; ctx.lineCap = "round"; ctx.lineJoin = "round";
-        ctx.beginPath(); ctx.moveTo(x - R * 0.11, y + R * 0.05); ctx.lineTo(x, y - R * 0.06); ctx.lineTo(x + R * 0.11, y + R * 0.05); ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
     }
 
-    // Mouth: a small bar that opens with the voice.
-    const mx = cx + gaze.x * R * 0.05, my = cy + R * 0.3 + gaze.y * R * 0.04;
-    if (pose !== "sleep") {
-      ctx.fillStyle = C.eye;
-      pill(mx, my, R * (0.2 - 0.05 * mouth), R * (0.03 + 0.12 * mouth));
+    const mx = cx + gaze.x * R * 0.05, my = cy + R * 0.36 + gaze.y * R * 0.04;
+    const open = Math.min(1, mouth * 1.6);
+    if (open < 0.98) {
+      ctx.strokeStyle = rgba(C.eye, 1 - open);
+      ctx.lineWidth = R * 0.034; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(mx, my - R * 0.13, R * 0.17, 0.22 * Math.PI, 0.78 * Math.PI); ctx.stroke();
+    }
+    if (open > 0.02) {
+      ctx.fillStyle = rgba(C.eye, open);
+      ctx.beginPath(); ctx.ellipse(mx, my, R * (0.1 + 0.03 * mouth), R * (0.025 + 0.11 * mouth), 0, 0, TAU); ctx.fill();
     }
 
     drawAccessory(look.acc, cx, cy, R, look.accAmt);
