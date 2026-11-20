@@ -23,7 +23,17 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     private static let modelBase = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/"
     private static let gpuModel = "kokoro_int8_gpu_fp16.litertlm"
     private static let cpuModel = "kokoro_int8_fp16.litertlm"
-    private var useGPU: Bool { !FileManager.default.fileExists(atPath: gpuOffMarker.path) }
+    private var useGPU: Bool { !xcodeMetalChecker && !gpuTurnedOff }
+
+    /// Xcode's "Metal API Validation" checker (on when running from Xcode unless switched off in the
+    /// scheme) stops the app on a harmless quirk in MediaPipe's GPU code. When it's on, use the CPU
+    /// voice for that run; launched normally (or with the checker off), the fast GPU voice is used.
+    private var xcodeMetalChecker: Bool { ProcessInfo.processInfo.environment["MTL_DEBUG_LAYER"] == "1" }
+
+    /// The GPU voice stopped the app during this build: stay on the CPU voice until the next build.
+    private var gpuTurnedOff: Bool {
+        (try? String(contentsOf: gpuOffMarker, encoding: .utf8)) == buildStamp
+    }
     private var modelName: String { useGPU ? KokoroVoice.gpuModel : KokoroVoice.cpuModel }
     private var modelURL: URL { URL(string: KokoroVoice.modelBase + modelName)! }
 
@@ -105,13 +115,12 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     /// True if the built-in voice should stay off because it seems to keep crashing the app.
     private func crashedBefore() -> Bool {
         let fm = FileManager.default
-        // The GPU version stopped the app: move this device to the CPU version (one strike is
-        // enough, since the GPU crash happens right away every time), and free its space.
+        // The GPU version stopped the app: use the CPU version for the rest of this build
+        // (a new build tries the GPU voice again). The GPU model is kept for that retry.
         if let what = try? String(contentsOf: busyMarker, encoding: .utf8), what == "gpu" {
-            print("My Mibo: the GPU voice stopped the app; switching this device to the CPU voice.")
+            print("My Mibo: the GPU voice stopped the app; using the CPU voice until the next build.")
             markDone()
-            fm.createFile(atPath: gpuOffMarker.path, contents: Data())
-            try? fm.removeItem(at: folder.appendingPathComponent(KokoroVoice.gpuModel))
+            try? buildStamp.write(to: gpuOffMarker, atomically: true, encoding: .utf8)
             return false
         }
         var strikes = readStrikes()
@@ -213,7 +222,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
                     defaultVoiceId: "af_heart",
                     cacheDirectory: cache
                 )
-                print("My Mibo: loading the \(gpu ? "GPU" : "CPU") voice")
+                print("My Mibo: loading the \(gpu ? "GPU" : "CPU") voice" + (self.xcodeMetalChecker ? " (Xcode's Metal API Validation is on, so not the GPU voice)" : ""))
                 let engine = try createTextToSpeech(options: options)
                 self.markDone()
                 DispatchQueue.main.async {
