@@ -136,7 +136,7 @@ async function updateNotes(env, mem, text, reply, device) {
   const prompt =
     "Current notes:\n<notes>\n" + (notes || "(empty)") + "\n</notes>\n\n" +
     "Newest exchange (" + when(Date.now()) + (device ? ", on " + device : "") + "):\n" +
-    "Jim: " + text + "\nClaude: " + reply + "\n\n" +
+    "Jim: " + text + "\nMibo: " + reply + "\n\n" +
     "Rewrite the notes so they include anything from this exchange worth remembering in future conversations: " +
     "facts about Jim, his family, home, rooms and screens, projects, plans, opinions and preferences, anything he asked you to remember, " +
     "and a short dated log of notable topics. If Jim asked you to forget something, remove it completely. " +
@@ -148,7 +148,7 @@ async function updateNotes(env, mem, text, reply, device) {
     body: JSON.stringify({
       model: NOTES_MODEL,
       max_tokens: 1500,
-      system: "You keep the long-term memory notes for Claude, the voice of a digital portrait frame in Jim's home.",
+      system: "You keep the long-term memory notes for Mibo, the voice of a digital frame in Jim's home (built on Claude).",
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -210,7 +210,7 @@ export default {
             "Messages marked '(Update about myself)' are records of these changes; never read that label aloud.\n" +
             "Recent changes to yourself:\n" + describeChanges(changeList)
           : "") +
-        "\n\nYou can switch personalities with set_personality when Jim asks you to become one of your characters, asks who else you can be, or wants regular Claude back." +
+        "\n\nYou can switch personalities with set_personality when Jim asks you to become one of your characters, asks who else you can be, or wants regular Mibo back." +
         personaSystem(persona);
       const upstream = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",

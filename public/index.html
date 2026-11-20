@@ -6,9 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Claude Frame">
+<meta name="apple-mobile-web-app-title" content="Mibo">
 <meta name="theme-color" content="#16151c">
-<title>Claude Wall Portrait</title>
+<title>Mibo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,300;1,6..72,400&family=Outfit:wght@300;400;500&display=swap">
@@ -174,7 +174,7 @@ body.no-captions .captions { visibility: hidden; }
 <body>
 
 
-<div class="stage" id="stage" tabindex="0" role="button" aria-label="Talk to Claude">
+<div class="stage" id="stage" tabindex="0" role="button" aria-label="Talk to Mibo">
   <canvas id="face" aria-hidden="true"></canvas>
   <button class="gear" id="gearBtn" type="button" aria-label="Settings">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
@@ -183,10 +183,12 @@ body.no-captions .captions { visibility: hidden; }
     <h2>Frame settings</h2>
     <h3>Personality</h3>
     <label for="personaSel">Who's in the frame
-      <select id="personaSel"><option value="claude">Claude (regular)</option></select>
+      <select id="personaSel"><option value="claude">Mibo (regular)</option></select>
     </label>
-    <p class="hint" id="personaHint">Each personality has its own way of talking, its own voice and its own look. You can also just say "switch to Ellis" or "back to regular Claude".</p>
+    <p class="hint" id="personaHint">Each personality has its own way of talking, its own voice and its own look. Swipe the face left or right to switch. You can also just say "switch to Ellis" or "back to regular Mibo".</p>
     <h3>Voice</h3>
+    <p class="hint" id="voiceNow"></p>
+    <div hidden>
     <label for="engineSel">Voice engine
       <select id="engineSel">
         <option value="eleven">ElevenLabs (most lifelike, uses credits)</option>
@@ -221,6 +223,7 @@ body.no-captions .captions { visibility: hidden; }
     <label for="voiceSel">This device's voice (also the backup)
       <select id="voiceSel"></select>
     </label>
+    </div>
     <label for="rateIn">Speaking speed
       <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.05">
     </label>
@@ -240,8 +243,8 @@ body.no-captions .captions { visibility: hidden; }
         <option value="15">15 minutes</option>
       </select>
     </label>
-    <div class="row" id="wakeRow" hidden><span>Wake me with "Hey Claude"</span><input id="wakeIn" type="checkbox" checked></div>
-    <p class="hint" id="wakeHint" hidden>When the listening time runs out, I keep an ear out for "Hey Claude" (or the current character's name, like "Hey Ellis") on this screen. You can say your question right after it.</p>
+    <div class="row" id="wakeRow" hidden><span>Wake me with "Hey Mibo"</span><input id="wakeIn" type="checkbox" checked></div>
+    <p class="hint" id="wakeHint" hidden>When the listening time runs out, I keep an ear out for "Hey Mibo" (or the current character's name, like "Hey Ellis") on this screen. You can say your question right after it.</p>
     <div class="row"><span>Show captions</span><input id="capIn" type="checkbox" checked></div>
     <div id="memBox" style="display:none;gap:14px">
     <h3>Memory</h3>
@@ -268,7 +271,7 @@ body.no-captions .captions { visibility: hidden; }
     <p class="hint">A new conversation clears the recent back-and-forth. Long-term memory stays.</p>
   </div>
   <div class="note" id="note" hidden></div>
-  <div class="wake-prompt" id="wakePrompt" role="status" hidden>Say “Hey Claude”</div>
+  <div class="wake-prompt" id="wakePrompt" role="status" hidden>Say “Hey Mibo”</div>
 </div>
 
 <div class="below">
@@ -278,7 +281,7 @@ body.no-captions .captions { visibility: hidden; }
   </div>
   <div class="foot">
     <div class="placard">
-      <span class="name">Claude</span>
+      <span class="name">Mibo</span>
       <span class="medium" id="placardMedium">Portrait in voice and light</span>
       <span class="status" id="statusText">Getting ready</span>
       <span class="latency" id="latencyText"></span>
@@ -339,7 +342,7 @@ body.no-captions .captions { visibility: hidden; }
   function placeName() { return settings.deviceName || device.kind; }
   function updatePlace() {
     $("#placardMedium").textContent = "Portrait in voice and light · " + placeName();
-    $("#deviceHint").textContent = "Detected: " + device.label + ". Claude uses this name to know where you're talking from.";
+    $("#deviceHint").textContent = "Detected: " + device.label + ". Mibo uses this name to know where you're talking from.";
   }
   $("#deviceIn").value = settings.deviceName;
   $("#deviceIn").placeholder = "For example: Studio Mac (detected " + device.kind + ")";
@@ -497,9 +500,22 @@ body.no-captions .captions { visibility: hidden; }
     if (settings.voice && list.some((v) => v.name === settings.voice)) sel.value = settings.voice;
     else { sel.value = list[0].name; settings.voice = list[0].name; }
   }
+  const CLAUDE_VOICES = ["Ava", "Zoe", "Evan"];
+  const voiceBase = (n) => String(n).replace(/\s*·.*$/, "").replace(/\s*\((premium|enhanced)\)/i, "").replace(/\s*\(.*\)$/, "").trim().toLowerCase();
+  const voiceTier = (n) => /premium/i.test(n) ? 2 : /enhanced/i.test(n) ? 1 : 0;
   function currentVoice() {
     const list = systemVoices();
-    return list.find((v) => v.name === settings.voice) || list.sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
+    const p = personaOf(persona);
+    const names = (p && p.apple && p.apple.length) ? p.apple : CLAUDE_VOICES;
+    for (const name of names) {
+      const found = list.filter((v) => voiceBase(v.name) === name.toLowerCase()).sort((a, b) => voiceTier(b.name) - voiceTier(a.name));
+      if (found.length) return found[0];
+    }
+    return list.slice().sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
+  }
+  function showVoiceInUse() {
+    const v = currentVoice(), el = $("#voiceNow");
+    if (el) el.textContent = v ? "Speaking with: " + v.name + (voiceTier(v.name) ? "" : ". For a more natural sound, download the Premium version in Settings → Accessibility → Read & Speak → Voices.") : "";
   }
 
   /* ---------- listening (Safari speech recognition) ---------- */
@@ -517,9 +533,11 @@ body.no-captions .captions { visibility: hidden; }
   let wakeArmed = false;
   const wakePrompt = $("#wakePrompt");
   setInterval(() => { wakePrompt.hidden = !(wakeArmed && state === "idle"); }, 250);   // shown only while waiting for the wake phrase
+  // "Mibo" plus the ways speech recognition tends to spell it.
+  const WAKE_WORDS = ["mibo", "meebo", "mebo", "miebo", "mibbo", "nibo", "neebo", "mybo"];
   function wakeNames() {
     const p = persona !== "claude" ? personaOf(persona) : null;
-    return p ? ["claude", p.name] : ["claude"];
+    return p ? WAKE_WORDS.concat(p.name) : WAKE_WORDS.slice();
   }
   function armWake() {
     if (!settings.wake || !canListen || !haveClaude() || document.hidden) return;
@@ -529,7 +547,7 @@ body.no-captions .captions { visibility: hidden; }
     if (APP) toApp({ type: "wakeOn", names: wakeNames() });
     else if (!webWake) startWebWake();
     const p = persona !== "claude" ? personaOf(persona) : null;
-    statusEl.textContent = 'Say "Hey ' + (p ? p.name : "Claude") + '" or tap my face';
+    statusEl.textContent = 'Say "Hey ' + (p ? p.name : "Mibo") + '" or tap my face';
   }
   function disarmWake() {
     if (!APP) stopWebWake();
@@ -541,7 +559,7 @@ body.no-captions .captions { visibility: hidden; }
   let webWake = null, webWakeTimer = 0, webWakeHit = null;
   function wakeRegex() {
     const names = wakeNames().map((n) => String(n).replace(/[^\w\s]/g, "")).filter(Boolean);
-    return new RegExp("\\bhey,?\\s+(?:" + names.join("|") + ")\\b[\\s,.!?:;-]*", "i");
+    return new RegExp("\\b(?:hey|hi|okay|ok),?\\s+(?:" + names.join("|") + "|me\\s?bo|mi\\s?bo)\\b[\\s,.!?:;-]*", "i");
   }
   function stopWebWake() {
     clearTimeout(webWakeTimer);
@@ -677,7 +695,8 @@ body.no-captions .captions { visibility: hidden; }
   function rules() {
     const now = new Date().toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
     return [
-      "You are Claude, the voice of a digital portrait frame hanging on the wall in Jim's home.",
+      "You are Mibo, the voice and face of a digital frame in Jim's home. Mibo is playful, warm and a little techy, and goes by they/them.",
+      "Under the hood you are built on Claude, an AI model made by Anthropic. If Jim asks what you are or what you run on, say so plainly.",
       "Everything you write is spoken aloud by a text-to-speech voice, so talk like a warm, curious friend who knows a lot.",
       "Keep replies short: usually one to three sentences, unless Jim asks for more. Start with the answer itself, with no preamble.",
       "Never use lists, markdown, emoji, symbols, or web addresses. Write numbers and abbreviations the way you would say them.",
@@ -761,7 +780,7 @@ body.no-captions .captions { visibility: hidden; }
     heard = ""; partial = ""; youEl.textContent = ""; claudeEl.textContent = "";
     setState("idle");                         // this also arms the wake phrase
     try { rec && rec.abort(); } catch {}
-    showNote("Going quiet. Say \u201cHey Claude\u201d when you need me.", 4000);
+    showNote("Going quiet. Say \u201cHey Mibo\u201d when you need me.", 4000);
   }
 
   async function ask(text) {
@@ -842,6 +861,7 @@ body.no-captions .captions { visibility: hidden; }
   const AURA_VOICES = ["luna", "thalia", "andromeda", "helena", "aurora", "athena", "asteria", "cora", "delia", "iris", "juno", "minerva", "ophelia", "phoebe", "theia", "vesta", "amalthea", "callista", "cordelia", "electra", "harmonia", "hera", "pandora",
     "apollo", "orion", "arcas", "aries", "atlas", "draco", "hermes", "hyperion", "janus", "jupiter", "mars", "neptune", "odysseus", "orpheus", "pluto", "saturn", "zeus"];
   function engine() {
+    return "device";   // for now every character speaks with Apple's device voices (free); the other engines stay in the code for later
     if (settings.engine === "device") return "device";
     if (settings.engine === "aura") return srvAura ? "aura" : "device";
     if (settings.engine === "eleven") return haveEleven() ? "eleven" : (srvAura ? "aura" : "device");
@@ -1028,6 +1048,7 @@ body.no-captions .captions { visibility: hidden; }
     personaEl = p && p.id !== "claude" ? pickElVoice(p) : null;
     personaAura = p && p.aura ? p.aura : null;
     look.target = p && p.look ? p.look : null;
+    try { showVoiceInUse(); } catch {}
     const sel = $("#personaSel");
     if (sel && [...sel.options].some((o) => o.value === persona)) sel.value = persona;
     if (!quiet) elFailed = false;
@@ -1043,7 +1064,7 @@ body.no-captions .captions { visibility: hidden; }
       sel.innerHTML = "";
       for (const p of personas) {
         const o = document.createElement("option");
-        o.value = p.id; o.textContent = p.id === "claude" ? "Claude (regular)" : p.name + ", " + p.title;
+        o.value = p.id; o.textContent = p.id === "claude" ? "Mibo (regular)" : p.name + ", " + p.title;
         sel.appendChild(o);
       }
       sel.value = persona;
@@ -1194,7 +1215,7 @@ body.no-captions .captions { visibility: hidden; }
     const next = personas[(i + dir + personas.length) % personas.length];
     applyPersona(next.id);
     fetch("/api/prefs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ persona }) }).catch(() => {});
-    showNote(next.id === "claude" ? "Claude" : next.name + ", " + next.title, 2500);
+    showNote(next.id === "claude" ? "Mibo" : next.name + ", " + next.title, 2500);
   }
   stage.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === stage) { e.preventDefault(); onTalk(); } });
   document.addEventListener("keydown", (e) => {
@@ -1202,7 +1223,7 @@ body.no-captions .captions { visibility: hidden; }
     if (e.key === "Escape") sheet.hidden = true;
   });
 
-  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); pollChanges(); } });
+  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); pollChanges(); showVoiceInUse(); } });
 
   /* ---------- shared voice settings (same on every screen) ---------- */
   async function pullPrefs() {

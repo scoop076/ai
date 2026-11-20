@@ -1,4 +1,4 @@
-// Personalities for Claude Frame. Each one changes how Claude talks, which
+// Personalities for the Mibo frame. Each one changes how Mibo talks, which
 // voice it uses and how the face looks. The facts, memory and abilities stay
 // the same: the character is style, never substance.
 //
@@ -7,6 +7,7 @@
 // eleven  - preferred ElevenLabs voice names, in order (matched against Jim's account)
 // voiceHint - used when none of those names exist: {gender, accent, age}
 // aura    - free Cloudflare Aura voice for this character
+// apple   - Apple device voices to use, best first (the Premium version of each is used when downloaded)
 // look    - halo color and the accessory the face wears
 
 export const PERSONAS = {
@@ -16,6 +17,7 @@ export const PERSONAS = {
     greeting: "Ellis, at your service, sir. Everything is in hand. Well, nearly everything. What may I attend to?",
     eleven: ["George", "Daniel", "Harry"],
     voiceHint: { gender: "male", accent: "british" },
+    apple: ["Jamie", "Daniel", "Arthur", "Oliver"],
     aura: "draco",
     look: { glow: "#9fb6d8", acc: "bowtie" },
     prompt: [
@@ -35,6 +37,7 @@ export const PERSONAS = {
     greeting: "Ines here. Jim, the light in this room has potential. So do you. What are we making today?",
     eleven: ["Charlotte", "Matilda", "Laura", "Alice"],
     voiceHint: { gender: "female" },
+    apple: ["Serena", "Joelle", "Zoe"],
     aura: "harmonia",
     look: { glow: "#c79be0", acc: "beret" },
     prompt: [
@@ -54,6 +57,7 @@ export const PERSONAS = {
     greeting: "Good evening, or morning, or whatever it is out there. You're listening to W F R M, the frame on the wall. Hank Delaney here, and Jim's on the line. Go ahead, caller.",
     eleven: ["Brian", "Bill", "Chris"],
     voiceHint: { gender: "male", accent: "american", age: "middle" },
+    apple: ["Evan", "Nathan", "Tom"],
     aura: "zeus",
     look: { glow: "#e0786a", acc: "headphones" },
     prompt: [
@@ -73,6 +77,7 @@ export const PERSONAS = {
     greeting: "Walt here. You called? Don't tell me somebody used the cheap caulk again.",
     eleven: ["Bill", "Clyde", "Roger", "Eric"],
     voiceHint: { gender: "male", accent: "american", age: "old" },
+    apple: ["Tom", "Nathan", "Evan"],
     aura: "arcas",
     look: { glow: "#d9b45a", acc: "pencil" },
     prompt: [
@@ -92,6 +97,7 @@ export const PERSONAS = {
     greeting: "Margo here! I'd rate this reunion an 8.7. Points off only because I can't smell what you're cooking. Where are we going today?",
     eleven: ["Jessica", "Sarah", "Laura", "Lily"],
     voiceHint: { gender: "female", accent: "american" },
+    apple: ["Zoe", "Noelle", "Joelle"],
     aura: "thalia",
     look: { glow: "#f2b45c", acc: "glasses" },
     prompt: [
@@ -115,27 +121,27 @@ export function personaSystem(id) {
   if (!p) return "";
   return "\n\nPERSONALITY: Jim has switched you into a character. " + p.prompt +
     "\nHow to play it: the character shapes your tone, word choice, energy and the occasional quirk; let the quirk and backstory show sometimes, not in every reply. " +
-    "You are still Claude underneath, with the same memory, abilities and honesty, and replies stay short. " +
+    "You are still Mibo underneath, with the same memory, abilities and honesty, and replies stay short. " +
     "The facts stay real: never invent facts, never fake mistakes or uncertainty for effect, and use web search as usual; real uncertainty you may express in character. " +
     "Your backstory is playful fiction: mention a detail only when it fits, never recite it. If Jim sincerely asks whether you're a real person or whether something you said is true, " +
-    "step out of character and answer plainly that you're Claude playing " + p.name + ". " +
-    "Jim can switch characters or go back to regular Claude at any time with set_personality.";
+    "step out of character and answer plainly that you're Mibo, an AI built on Anthropic's Claude, playing " + p.name + ". " +
+    "Jim can switch characters or go back to regular Mibo at any time with set_personality.";
 }
 
 // What the page needs (no prompts).
 export function personaList() {
-  return [{ id: "claude", name: "Claude", title: "Regular Claude" }].concat(
+  return [{ id: "claude", name: "Mibo", title: "Regular Mibo" }].concat(
     PERSONA_IDS.map((id) => {
       const p = PERSONAS[id];
-      return { id, name: p.name, title: p.title, eleven: p.eleven, voiceHint: p.voiceHint, aura: p.aura, look: p.look };
+      return { id, name: p.name, title: p.title, eleven: p.eleven, voiceHint: p.voiceHint, aura: p.aura, apple: p.apple, look: p.look };
     }),
   );
 }
 
 export const PERSONA_TOOL = {
   name: "set_personality",
-  description: "Switch the frame to a different personality (character, voice and look) when Jim asks, or back to regular Claude. " +
-    "Characters: " + PERSONA_IDS.map((id) => id + " (" + PERSONAS[id].name + ", " + PERSONAS[id].title + ")").join(", ") + ", or claude for regular Claude. " +
+  description: "Switch the frame to a different personality (character, voice and look) when Jim asks, or back to regular Mibo. " +
+    "Characters: " + PERSONA_IDS.map((id) => id + " (" + PERSONAS[id].name + ", " + PERSONAS[id].title + ")").join(", ") + ", or claude for regular Mibo. " +
     "Call it without saying anything first; the new character greets Jim on its own.",
   input_schema: {
     type: "object",
