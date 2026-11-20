@@ -328,14 +328,14 @@ body.no-captions .captions { visibility: hidden; }
     else if (/Macintosh|Mac OS X/.test(ua)) kind = "Mac";
     else if (/Windows/.test(ua)) kind = "Windows PC";
     let app = "a web browser";
-    if (/ClaudeFrameApp/.test(ua)) app = "the Claude Frame app";
+    if (/MyMiboApp|ClaudeFrameApp/.test(ua)) app = "the My Mibo app";
     else if (/Edg\//.test(ua)) app = "Edge";
     else if (/CriOS|Chrome\//.test(ua)) app = "Chrome";
     else if (/FxiOS|Firefox\//.test(ua)) app = "Firefox";
     else if (/Safari\//.test(ua)) app = "Safari";
     let standalone = false;
     try { standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch {}
-    const how = standalone && !/ClaudeFrameApp/.test(ua) ? "the home screen app" : app;
+    const how = standalone && !/MyMiboApp|ClaudeFrameApp/.test(ua) ? "the home screen app" : app;
     return { kind, how, label: kind + " (" + how + ")" };
   }
   const device = detectDevice();
@@ -354,7 +354,7 @@ body.no-captions .captions { visibility: hidden; }
   $("#elModelSel").value = settings.elModel;
   document.body.classList.toggle("no-captions", !settings.captions);
 
-  /* ---------- the Claude Frame app (iPad / iPhone) ----------
+  /* ---------- the My Mibo app (iPad / iPhone) ----------
      Inside the app, the microphone, speech recognition and the speaker are
      handled natively, so Safari's audio handoffs can't make the frame deaf or
      mute. In a normal browser none of this runs. */
@@ -468,7 +468,7 @@ body.no-captions .captions { visibility: hidden; }
     fillVoices();
     if (haveEleven()) loadElVoices();
     if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices;
-    $("#modeHint").textContent = APP ? "Listening and speaking are handled by the Claude Frame app on this device." : canListen
+    $("#modeHint").textContent = APP ? "Listening and speaking are handled by the My Mibo app on this device." : canListen
       ? "Listening uses Safari's speech recognition. The first time, allow the microphone and speech recognition."
       : "This browser can't do speech recognition. On the iPad, open this page in Safari.";
     if (!haveClaude()) { setState("needkey"); sheet.hidden = false; claudeEl.textContent = "Hello, Jim. Add your Claude API key in settings to wake me up."; return; }

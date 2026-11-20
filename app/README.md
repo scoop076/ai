@@ -7,8 +7,8 @@ from the website, so changes Jim approves by voice show up in the app too.
 
 ## Install on a device
 
-1. On the Mac, open `ClaudeFrame.xcodeproj` in Xcode.
-2. Click **ClaudeFrame** at the top of the left sidebar, then the
+1. On the Mac, open `MyMibo.xcodeproj` in Xcode.
+2. Click **MyMibo** at the top of the left sidebar, then the
    **Signing & Capabilities** tab. Under **Team**, pick your Apple account
    (Add an Account... if it isn't listed).
 3. If Xcode says the bundle identifier is taken, change

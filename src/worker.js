@@ -39,7 +39,7 @@ const WEB_SEARCH = {
 const FRAME_TOOLS = [
   {
     name: "request_frame_change",
-    description: "Start changing Claude Frame's own page or code because Jim asked for a change to how the frame looks, sounds or behaves. Say one short sentence before calling it.",
+    description: "Start changing Mibo's own page or code because Jim asked for a change to how the frame looks, sounds or behaves. Say one short sentence before calling it.",
     input_schema: {
       type: "object",
       properties: { description: { type: "string", description: "A clear, complete description of the change for an engineer, including every detail Jim mentioned." } },

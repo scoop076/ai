@@ -1,4 +1,4 @@
-// Native listening and speaking for Claude Frame.
+// Native listening and speaking for My Mibo.
 //
 // One steady audio setup (play and record, through the speaker) is chosen at
 // launch and never switched, so the microphone and the voice can't fight over
@@ -63,7 +63,7 @@ final class NativeAudio: NSObject {
 
     // Setting up the device's audio can take a moment, so it's done off the main
     // thread (keeping the screen responsive) and only when actually needed.
-    private let sessionQueue = DispatchQueue(label: "claudeframe.audiosession", qos: .userInitiated)
+    private let sessionQueue = DispatchQueue(label: "mymibo.audiosession", qos: .userInitiated)
     private var sessionReady = false
 
     private func configureSession() {
@@ -78,7 +78,7 @@ final class NativeAudio: NSObject {
                 try session.setCategory(.playAndRecord, mode: .default, options: options)
                 try session.setActive(true)
             } catch {
-                print("Claude Frame: audio setup failed: \(error)")
+                print("My Mibo: audio setup failed: \(error)")
             }
         }
     }

@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		CF0000000000000000000001 /* ClaudeFrame.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeFrame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CF0000000000000000000001 /* MyMibo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyMibo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		CF0000000000000000000002 /* ClaudeFrame */ = {
+		CF0000000000000000000002 /* MyMibo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ClaudeFrame;
+			path = MyMibo;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		CF0000000000000000000004 = {
 			isa = PBXGroup;
 			children = (
-				CF0000000000000000000002 /* ClaudeFrame */,
+				CF0000000000000000000002 /* MyMibo */,
 				CF0000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		CF0000000000000000000005 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CF0000000000000000000001 /* ClaudeFrame.app */,
+				CF0000000000000000000001 /* MyMibo.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		CF0000000000000000000006 /* ClaudeFrame */ = {
+		CF0000000000000000000006 /* MyMibo */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CF000000000000000000000B /* Build configuration list for PBXNativeTarget "ClaudeFrame" */;
+			buildConfigurationList = CF000000000000000000000B /* Build configuration list for PBXNativeTarget "MyMibo" */;
 			buildPhases = (
 				CF0000000000000000000007 /* Sources */,
 				CF0000000000000000000003 /* Frameworks */,
@@ -61,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				CF0000000000000000000002 /* ClaudeFrame */,
+				CF0000000000000000000002 /* MyMibo */,
 			);
-			name = ClaudeFrame;
+			name = MyMibo;
 			packageProductDependencies = (
 			);
-			productName = ClaudeFrame;
-			productReference = CF0000000000000000000001 /* ClaudeFrame.app */;
+			productName = MyMibo;
+			productReference = CF0000000000000000000001 /* MyMibo.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = CF000000000000000000000A /* Build configuration list for PBXProject "ClaudeFrame" */;
+			buildConfigurationList = CF000000000000000000000A /* Build configuration list for PBXProject "MyMibo" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				CF0000000000000000000006 /* ClaudeFrame */,
+				CF0000000000000000000006 /* MyMibo */,
 			);
 		};
 /* End PBXProject section */
@@ -238,7 +238,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		CF000000000000000000000A /* Build configuration list for PBXProject "ClaudeFrame" */ = {
+		CF000000000000000000000A /* Build configuration list for PBXProject "MyMibo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CF000000000000000000000C /* Debug */,
@@ -247,7 +247,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CF000000000000000000000B /* Build configuration list for PBXNativeTarget "ClaudeFrame" */ = {
+		CF000000000000000000000B /* Build configuration list for PBXNativeTarget "MyMibo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CF000000000000000000000E /* Debug */,
