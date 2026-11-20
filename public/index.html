@@ -45,7 +45,7 @@ body {
 }
 .stage { position: relative; flex: 1; min-height: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 /* The glow fills the whole screen; the captions float over it. */
-#face { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; background: radial-gradient(circle at 50% 45%, var(--glow-pale), var(--glow) 40%, var(--glow-deep)); }
+#face { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; background-color: var(--glow); background-image: radial-gradient(circle at 50% 45%, var(--bg-pale, var(--glow-pale)), var(--bg-glow, var(--glow)) 40%, var(--bg-deep, var(--glow-deep))); }
 .stage:focus-visible { outline: 2px solid var(--listen); outline-offset: -6px; }
 
 .gear {
@@ -1634,10 +1634,16 @@ body.no-captions .captions { visibility: hidden; }
     else look.accAmt = ease(look.accAmt, wantAcc ? 1 : 0, 3, dt);
     // The warm glow fills the whole screen, pale near the face and deeper toward the edges.
     const paleNow = glowNow.map((v) => v + (255 - v) * 0.45), deepNow = glowNow.map((v) => v * 0.78);
-    const bg = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.38, R * 0.1, cx, cy, Math.hypot(W, H) * 0.6);
-    bg.addColorStop(0, rgbaA(paleNow, 1)); bg.addColorStop(0.4, rgbaA(glowNow, 1)); bg.addColorStop(1, rgbaA(deepNow, 1));
-    ctx.fillStyle = rgbaA(glowNow, 1); ctx.fillRect(0, 0, W, H);   // solid orange base first, so the screen is never blank
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    // The glow is the canvas element's own CSS background (never painted over on the canvas), so it always stays orange.
+    if (glowNow.every(Number.isFinite)) {
+      const bgKey = rgbaA(glowNow, 1);
+      if (cv.dataset.bg !== bgKey) {
+        cv.dataset.bg = bgKey;
+        cv.style.setProperty("--bg-pale", rgbaA(paleNow, 1));
+        cv.style.setProperty("--bg-glow", bgKey);
+        cv.style.setProperty("--bg-deep", rgbaA(deepNow, 1));
+      }
+    }
     const pulse = 0.06 * listenAmt + 0.1 * mouth;
     if (pulse > 0.005) {
       const lift = ctx.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 2.6);
