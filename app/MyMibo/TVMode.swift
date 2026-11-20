@@ -62,6 +62,33 @@ final class TVMode: ObservableObject {
     }
 }
 
+/// Holds the frame on this device's screen. From iOS 27 on, this is also where the app tells
+/// iOS it has its own content for an external display (a "scene accessory"); without that,
+/// iOS 27 just mirrors the phone. Older iOS versions use AppDelegate below instead.
+final class FrameViewController: UIViewController {
+    private let home: UIView
+    private var tvRegistration: Any?   // a UISceneAccessoryRegistration on iOS 27
+
+    init(home: UIView) {
+        self.home = home
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func loadView() { view = home }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if #available(iOS 27.0, *) {
+            let configuration = UISceneConfiguration()
+            configuration.delegateClass = TVSceneDelegate.self
+            let accessory = UISceneAccessory.externalNonInteractive(sceneConfiguration: configuration)
+            tvRegistration = registerSceneAccessory(accessory)
+        }
+    }
+}
+
 /// Runs the TV's screen while mirroring.
 final class TVSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -74,7 +101,7 @@ final class TVSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 }
 
-/// Hands the TV (an external display) to TVSceneDelegate; everything else stays with SwiftUI.
+/// Before iOS 27: hands the TV (an external display) to TVSceneDelegate; everything else stays with SwiftUI.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,

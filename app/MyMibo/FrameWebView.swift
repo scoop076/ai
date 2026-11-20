@@ -7,10 +7,10 @@ import WebKit
 let frameURL = URL(string: "https://ai.liljimjim.com")!
 let miboOrange = UIColor(red: 217/255, green: 119/255, blue: 21/255, alpha: 1)   // #D97715
 
-struct FrameWebView: UIViewRepresentable {
+struct FrameWebView: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> UIView {
+    func makeUIViewController(context: Context) -> FrameViewController {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()            // keeps the Cloudflare sign-in between launches
         config.allowsInlineMediaPlayback = true
@@ -49,10 +49,10 @@ struct FrameWebView: UIViewRepresentable {
         web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         home.addSubview(web)
         TVMode.shared.attach(web: web, home: home)
-        return home
+        return FrameViewController(home: home)
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIViewController(_ controller: FrameViewController, context: Context) {}
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
         weak var web: WKWebView?
