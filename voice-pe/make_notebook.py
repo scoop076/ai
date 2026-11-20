@@ -183,9 +183,29 @@ if "n >= 8000" in s:
     print("Already done.")
 elif old in s:
     open(p, "w").write(s.replace(old, new))
-    print("Done.")
+    pass
 else:
     print("Couldn't find the spot to change. Send Claude a screenshot.")
+
+p = "microWakeWord/microwakeword/data.py"
+s = open(p).read()
+old = \"\"\"                    if n >= 8000 and mode in ("validation", "testing"):
+                        break
+\"\"\"
+new = old + \"\"\"                    if mode == "validation_ambient" and n % 5:
+                        continue
+\"\"\"
+if "n % 5" not in s and old in s:
+    s = s.replace(old, new)
+    open(p, "w").write(s)
+t = "microWakeWord/microwakeword/train.py"
+u = open(t).read()
+old2 = 'data_processor.get_mode_duration("validation_ambient") / 3600.0'
+new2 = 'data_processor.get_mode_duration("validation_ambient") / 5 / 3600.0'
+if old2 in u:
+    open(t, "w").write(u.replace(old2, new2))
+ok = "n % 5" in open(p).read() and new2 in open(t).read()
+print("Done." if ok else "Something didn't change. Send Claude a screenshot.")
 """)
 
 code("""
