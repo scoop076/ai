@@ -967,7 +967,8 @@ body.no-captions .captions { visibility: hidden; }
         start: () => { sysSpeaking = 1; markAudioStart(); },
         end: () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); },
       };
-      toApp({ type: "say", id, text, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), rate: speechRate() });
+      // Mibo's built-in voice: the slider's default spot (1.2) is its normal speed; left is slower, right faster.
+      toApp({ type: "say", id, text, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), kokoroRate: speechRate() / 1.2, rate: speechRate() });
       return;
     }
     if (!("speechSynthesis" in window)) return;
