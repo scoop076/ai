@@ -74,20 +74,25 @@ html, body { background-color: var(--glow); }
 }
 .captions {
   height: 7.4em;
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
-  overflow: hidden;
+  display: flex; flex-direction: column; gap: 6px;
+  overflow: hidden; scroll-behavior: smooth;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 2.2em);
   mask-image: linear-gradient(to bottom, transparent 0, #000 2.2em);
   text-align: center;
 }
 .you { color: var(--muted); font-size: 0.95rem; min-height: 1.3em; }
+/* Short captions sit at the bottom; long ones overflow safely and are scrolled as the words are revealed. */
+.captions > :first-child { margin-top: auto; }
+/* Reply words are laid out up front but fade in as they are spoken, so nothing re-wraps or jumps. */
+.claude .w { opacity: 0; transition: opacity 0.18s ease; }
+.claude .w.on { opacity: 1; }
 /* While listening, the last reply steps aside so Jim's words show as he speaks. */
 body.is-listening .claude { display: none; }
 body.is-listening .you { color: var(--ink); font-size: clamp(1.1rem, 2.2vw, 1.4rem); line-height: 1.32; }
 .you:not(:empty)::before { content: "You  "; letter-spacing: 0.12em; font-size: 0.72rem; text-transform: uppercase; opacity: 0.8; }
 .claude {
   font-size: clamp(1.1rem, 2.2vw, 1.4rem); line-height: 1.32; color: var(--ink);
-  text-wrap: pretty; max-width: 40ch; margin: 0 auto;
+  text-wrap: wrap; max-width: 40ch; margin: 0 auto;
 }
 .foot { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 14px; }
 .placard {
@@ -433,7 +438,7 @@ body.no-captions .captions { visibility: hidden; }
   // can show them while Mibo is on the TV. Checked a few times a second; sent only when they change.
   let sentYou = null, sentMibo = null;
   if (APP) setInterval(() => {
-    const you = youEl.textContent || "", mibo = claudeEl.textContent || "";
+    const you = youEl.textContent || "", mibo = miboText();
     if (you === sentYou && mibo === sentMibo) return;
     sentYou = you; sentMibo = mibo;
     toApp({ type: "captions", you, mibo });
@@ -844,6 +849,7 @@ body.no-captions .captions { visibility: hidden; }
     const my = ++turn;
     finalizeReply();
     youEl.textContent = text;
+    capReset(); capOn = true;
     claudeEl.textContent = "";
     setState("thinking");
     history.push({ role: "user", content: text });
@@ -852,10 +858,10 @@ body.no-captions .captions { visibility: hidden; }
     ctl = new AbortController();
     try {
       const full = await streamClaude(buildMessages(), ctl.signal, (t) => {
-        if (my !== turn) return; if (!tText) tText = performance.now(); replyText = t; claudeEl.textContent = t; pump(false);
+        if (my !== turn) return; if (!tText) tText = performance.now(); replyText = t; pump(false);
       });
       if (my !== turn) return;
-      replyText = full; claudeEl.textContent = full;
+      replyText = full;
       pump(true);
       history.push({ role: "assistant", content: full }); pushedReply = true;
       streamDone = true;
@@ -867,7 +873,7 @@ body.no-captions .captions { visibility: hidden; }
       pump(true);
       finalizeReply();
       showNote(copyFor(e), 7000);
-      if (queued === 0) setState("idle"); else maybeFinish();
+      if (queued === 0) { capAll(); setState("idle"); } else maybeFinish();
     }
   }
   function finalizeReply() {
@@ -963,9 +969,58 @@ body.no-captions .captions { visibility: hidden; }
     if (!sel.options.length) for (const v of AURA_VOICES) { const o = document.createElement("option"); o.value = v; o.textContent = v[0].toUpperCase() + v.slice(1); sel.appendChild(o); }
     sel.value = settings.auraVoice;
   }
+  /* Captions follow the voice: each spoken chunk's words are laid out hidden, then revealed when that chunk starts. */
+  let capWords = [], capQ = [], capShown = 0, capTimer = 0, capCur = null, capOn = false;
+  const capBox = document.querySelector(".captions");
+  function miboText() {
+    if (capWords.length && capWords[0].isConnected) return capWords.slice(0, capShown).map((s) => s.textContent).join("").trim();
+    return claudeEl.textContent || "";
+  }
+  function capReset() { clearTimeout(capTimer); capWords = []; capQ = []; capShown = 0; capCur = null; try { capBox.scrollTop = 0; } catch {} }
+  function capStop() { clearTimeout(capTimer); capQ = []; capCur = null; }
+  function capAdd(raw) {
+    const words = clean(raw).split(" ").filter(Boolean);
+    if (!words.length) return;
+    const from = capWords.length;
+    for (const w of words) {
+      const s = document.createElement("span");
+      s.className = "w"; s.textContent = w + " ";
+      claudeEl.appendChild(s); capWords.push(s);
+    }
+    capQ.push({ from, to: capWords.length });
+  }
+  function capReveal(n) {
+    n = Math.min(n, capWords.length);
+    let last = null;
+    while (capShown < n) { last = capWords[capShown++]; last.classList.add("on"); }
+    if (last && last.isConnected) {
+      const cr = capBox.getBoundingClientRect(), r = last.getBoundingClientRect();
+      const want = (r.bottom - cr.top + capBox.scrollTop) - capBox.clientHeight;
+      if (want > capBox.scrollTop + 1) capBox.scrollTop = want;
+    }
+  }
+  function capAll() { clearTimeout(capTimer); capCur = null; capReveal(capWords.length); }
+  function capStart() {
+    const c = capQ.shift();
+    if (!c) return;
+    clearTimeout(capTimer);
+    if (capCur) capReveal(capCur.to);   // finish the previous chunk before the next begins
+    capReveal(c.from);
+    capCur = c;
+    const step = () => {
+      if (capShown >= c.to) return;
+      const w = capWords[capShown];
+      capReveal(capShown + 1);
+      const t = w ? w.textContent.trim() : "";
+      const ms = ((t.length + 1) * 62) / speechRate() + (/[.!?,;:…]$/.test(t) ? 150 : 0);
+      capTimer = setTimeout(step, Math.max(110, ms));
+    };
+    step();
+  }
   function speakChunk(raw) {
     const text = pronounce(clean(raw));
     if (!text) return;
+    if (capOn) capAdd(raw);
     if (useCloud()) { speakEleven(text); return; }
     speakSystem(text);
   }
@@ -987,7 +1042,7 @@ body.no-captions .captions { visibility: hidden; }
       toApp({ type: "say", id, text: said, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), kokoroRate: speechRate() / 1.2, rate: speechRate() });
       return;
     }
-    if (!("speechSynthesis" in window)) return;
+    if (!("speechSynthesis" in window)) { capAll(); return; }
     queued++;
     const u = new SpeechSynthesisUtterance(text);
     const v = currentVoice();
@@ -1193,6 +1248,7 @@ body.no-captions .captions { visibility: hidden; }
   }
 
   function markAudioStart() {
+    capStart();
     if (state === "thinking" || state === "speaking") setState("speaking");
     if (!firstAudio && t0) {
       firstAudio = true;
@@ -1205,6 +1261,7 @@ body.no-captions .captions { visibility: hidden; }
   function maybeFinish() {
     if (!streamDone || queued > 0) return;
     if (state !== "speaking" && state !== "thinking") return;
+    capAll();
     sysSpeaking = 0;
     setState("idle");
     if (testing) { testing = false; return; }
@@ -1225,6 +1282,7 @@ body.no-captions .captions { visibility: hidden; }
   }
   function stopSpeech() {
     queued = 0; streamDone = true;
+    capStop();
     gen++;
     try { if (curSource) curSource.stop(); } catch {}
     if (APP) {
@@ -1443,6 +1501,7 @@ body.no-captions .captions { visibility: hidden; }
     pendingAnnounce = "";
     note.hidden = true;                                // the caption carries it now
     announcing = true; t0 = 0; streamDone = true; queued = 0;
+    capReset(); capOn = false;
     claudeEl.textContent = text;
     setState("speaking");
     speakChunk(text);
@@ -1623,6 +1682,7 @@ body.no-captions .captions { visibility: hidden; }
     unlockAudio(); ensureAudio();
     if (state === "speaking" || state === "thinking") interrupt();
     if (state === "listening") { turn++; try { rec && rec.abort(); } catch {} }
+    capOn = false;
     testing = true; t0 = 0; streamDone = true; queued = 0;
     setState("speaking");
     speakChunk("Jim, this is how I'll sound on your wall. Do you like it?");
