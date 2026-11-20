@@ -22,11 +22,11 @@ struct FrameWebView: UIViewControllerRepresentable {
         web.isOpaque = false
         web.backgroundColor = miboOrange           // matches the page's glow, so loading and pull-to-reload stay orange
         web.scrollView.backgroundColor = miboOrange
-        web.scrollView.alwaysBounceVertical = true   // pull down on the frame to reload it
-        let refresh = UIRefreshControl()
-        refresh.tintColor = .white
-        refresh.addTarget(context.coordinator, action: #selector(Coordinator.pulledToReload(_:)), for: .valueChanged)
-        web.scrollView.refreshControl = refresh
+        // No pull-to-reload: the page never scrolls, so it could never work, and the control's
+        // leftover phone-sized frame caused screen-conversion warnings in TV mode.
+        // Mibo reloads itself when a new version is out (and settings has a Reload button).
+        web.scrollView.isScrollEnabled = false
+        web.scrollView.bounces = false
         context.coordinator.web = web
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.allowsBackForwardNavigationGestures = false
