@@ -160,6 +160,9 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
 .sheet .hint { font-size: 0.78rem; color: var(--muted); line-height: 1.45; margin: 0; }
 .sheet button.quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 
+/* Captions sit on the orange glow, so they use the dark eye color to stay readable. */
+.captions .you, body.is-listening .you { color: var(--eye); opacity: 0.8; }
+.captions .claude { color: var(--eye); }
 body.no-captions .captions { visibility: hidden; }
 /* The museum-style label is kept in the page (other code updates it) but not shown. */
 .placard { display: none; }
@@ -1527,7 +1530,19 @@ body.no-captions .captions { visibility: hidden; }
     if (!acc || a < 0.01) return;
     ctx.save();
     ctx.globalAlpha = a;
-    if (acc === "bowtie") {
+    if (acc === "bow") {
+      ctx.translate(cx + R * 0.5, cy - R * 0.72); ctx.rotate(-0.25);
+      ctx.fillStyle = "#3f8a6a";
+      for (const s of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(s * R * 0.2, -R * 0.22, s * R * 0.38, -R * 0.15);
+        ctx.quadraticCurveTo(s * R * 0.45, 0, s * R * 0.38, R * 0.15);
+        ctx.quadraticCurveTo(s * R * 0.2, R * 0.22, 0, 0); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s * R * 0.1, R * 0.3); ctx.lineTo(s * R * 0.2, R * 0.26); ctx.lineTo(s * R * 0.04, 0); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = "#6fb597";
+      ctx.beginPath(); ctx.ellipse(0, 0, R * 0.07, R * 0.09, 0, 0, TAU); ctx.fill();
+    } else if (acc === "bowtie") {
       const by = cy + R * 1.16;
       ctx.fillStyle = "#3a4d78";
       for (const s of [-1, 1]) {
@@ -1611,17 +1626,23 @@ body.no-captions .captions { visibility: hidden; }
 
     ctx.clearRect(0, 0, W, H);
     const cx = W / 2, cy = faceTop + faceH * 0.52, R = Math.max(40, Math.min(W, faceH) * 0.28);
-    const breath = Math.sin(t * 1.15) * 0.014 * motion;
 
     const tg = look.target ? hexRGB(look.target.glow) : baseGlow;
     for (let i = 0; i < 3; i++) glowNow[i] = ease(glowNow[i], tg[i], 1.6, dt);
-    const wantAcc = look.target ? look.target.acc : null;
+    const wantAcc = look.target ? look.target.acc : "bow";
     if (look.acc !== wantAcc) { look.accAmt = ease(look.accAmt, 0, 7, dt); if (look.accAmt < 0.03) look.acc = wantAcc; }
     else look.accAmt = ease(look.accAmt, wantAcc ? 1 : 0, 3, dt);
-    const halo = ctx.createRadialGradient(cx, cy, R * 0.5, cx, cy, R * 2.6);
-    halo.addColorStop(0, rgbaA(glowNow, 0.2 + 0.08 * listenAmt + 0.1 * mouth));
-    halo.addColorStop(1, rgbaA(glowNow, 0));
-    ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
+    // The warm glow fills the whole screen, pale near the face and deeper toward the edges.
+    const paleNow = glowNow.map((v) => v + (255 - v) * 0.45), deepNow = glowNow.map((v) => v * 0.78);
+    const bg = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.38, R * 0.1, cx, cy, Math.hypot(W, H) * 0.6);
+    bg.addColorStop(0, rgbaA(paleNow, 1)); bg.addColorStop(0.4, rgbaA(glowNow, 1)); bg.addColorStop(1, rgbaA(deepNow, 1));
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    const pulse = 0.06 * listenAmt + 0.1 * mouth;
+    if (pulse > 0.005) {
+      const lift = ctx.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 2.6);
+      lift.addColorStop(0, rgbaA(paleNow, pulse)); lift.addColorStop(1, rgbaA(paleNow, 0));
+      ctx.fillStyle = lift; ctx.fillRect(0, 0, W, H);
+    }
 
     if (listenAmt > 0.01) {
       for (let i = 0; i < 2; i++) {
@@ -1631,18 +1652,6 @@ body.no-captions .captions { visibility: hidden; }
         ctx.beginPath(); ctx.arc(cx, cy, R * (1.12 + 0.35 * p * motion), 0, TAU); ctx.stroke();
       }
     }
-
-    ctx.beginPath();
-    for (let i = 0; i <= 96; i++) {
-      const th = (i / 96) * TAU;
-      const r = R * (1 + breath + 0.013 * Math.sin(3 * th + t * 0.9) * motion + 0.008 * Math.sin(5 * th - t * 1.3) * motion);
-      const x = cx + Math.cos(th) * r, y = cy + Math.sin(th) * r * 1.05;
-      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-    }
-    ctx.closePath();
-    const skin = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.38, R * 0.1, cx, cy, R * 1.1);
-    skin.addColorStop(0, C.pale); skin.addColorStop(0.55, C.glow); skin.addColorStop(1, C.deep);
-    ctx.fillStyle = skin; ctx.fill();
 
     const ew = R * 0.14, eh = R * 0.24 * lid * (1 + 0.12 * listenAmt);
     for (const side of [-1, 1]) {
