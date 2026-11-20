@@ -249,6 +249,8 @@ final class NativeAudio: NSObject {
         req.shouldReportPartialResults = true
         req.addsPunctuation = true
         req.taskHint = .dictation
+        // Tell speech recognition these words are likely, so "Mibo" isn't heard as "Mabel" or "maybe".
+        req.contextualStrings = ["Mibo", "Hey Mibo", "Collinsville"]
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }   // faster, no daily limit
 
         let input = engine.inputNode
@@ -322,7 +324,7 @@ final class NativeAudio: NSObject {
     // MARK: - Wake phrase
 
     private func wakeOn(names: [String]) {
-        var words = ["mibo", "meebo", "mebo", "miebo", "mibbo", "nibo", "neebo", "mybo"]   // "Mibo" and how speech recognition tends to spell it
+        var words = ["mibo", "meebo", "mebo", "miebo", "mibbo", "nibo", "neebo", "mybo", "mabel", "mable", "maybel", "mibel"]   // "Mibo" and how speech recognition tends to spell it
         for n in names {
             let w = n.lowercased().filter { $0.isLetter }
             if !w.isEmpty && !words.contains(w) { words.append(w) }
