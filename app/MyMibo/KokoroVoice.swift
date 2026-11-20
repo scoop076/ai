@@ -17,8 +17,11 @@ import MediaPipeTasksAudio
 final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     static let shared = KokoroVoice()
 
-    private static let modelName = "kokoro_int8_gpu_fp16.litertlm"
-    private static let modelURL = URL(string: "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm")!
+    // The CPU version of the model. The GPU version crashed inside MediaPipe on an iPhone
+    // (a Metal shader assert), so Mibo runs the voice on the main processor instead.
+    private static let modelName = "kokoro_int8_fp16.litertlm"
+    private static let modelURL = URL(string: "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_fp16.litertlm")!
+    private static let oldModelNames = ["kokoro_int8_gpu_fp16.litertlm"]
 
     /// "off" (not available here), "downloading", "loading", "ready" or "failed".
     private(set) var status = "off"
@@ -59,12 +62,42 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         return base.appendingPathComponent("Kokoro", isDirectory: true).appendingPathComponent(KokoroVoice.modelName)
     }
 
+    // MARK: - Crash guard
+    //
+    // A problem inside the voice engine can stop the whole app, which no error handling can catch.
+    // So a small marker file is written just before loading or speaking, and removed right after.
+    // If the app finds the marker when it starts, the engine took the app down last time: from then
+    // on (for this model) Mibo sticks with Apple's voices instead of crashing again.
+
+    private var folder: URL { modelFile.deletingLastPathComponent() }
+    private var busyMarker: URL { folder.appendingPathComponent("busy-" + KokoroVoice.modelName) }
+    private var offMarker: URL { folder.appendingPathComponent("off-" + KokoroVoice.modelName) }
+
+    private func markBusy() { FileManager.default.createFile(atPath: busyMarker.path, contents: Data()) }
+    private func markDone() { try? FileManager.default.removeItem(at: busyMarker) }
+
+    /// True if the built-in voice should stay off because it crashed the app before.
+    private func crashedBefore() -> Bool {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: busyMarker.path) {
+            print("My Mibo: the built-in voice stopped the app last time; using Apple's voices from now on.")
+            fm.createFile(atPath: offMarker.path, contents: Data())
+            markDone()
+        }
+        return fm.fileExists(atPath: offMarker.path)
+    }
+
     // MARK: - Getting the model ready
 
     /// Load the model, downloading it first if needed. Safe to call any time.
     func start() {
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
         guard status == "off" || status == "failed" else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for old in KokoroVoice.oldModelNames {   // free the space the old model used
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(old))
+        }
+        if crashedBefore() { setStatus("failed"); return }
         if FileManager.default.fileExists(atPath: modelFile.path) { load() } else { download() }
         #endif
     }
@@ -128,17 +161,20 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         let path = modelFile.path
         DispatchQueue.global(qos: .userInitiated).async {
             do {
+                self.markBusy()
                 let options = TextToSpeechOptions(
-                    baseOptions: TTSBaseOptions(modelAssetPath: path, delegate: .gpu),
+                    baseOptions: TTSBaseOptions(modelAssetPath: path, delegate: .cpu),
                     defaultVoiceId: "af_heart",
                     speakingRate: 1.0
                 )
                 let engine = try createTextToSpeech(options: options)
+                self.markDone()
                 DispatchQueue.main.async {
                     self.tts = engine
                     self.setStatus("ready")
                 }
             } catch {
+                self.markDone()
                 print("My Mibo: couldn't load the voice model: \(error)")
                 // A damaged file would fail every time, so remove it; it downloads again next launch.
                 try? FileManager.default.removeItem(atPath: path)
@@ -163,6 +199,8 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
             await previous?.value                     // synthesize in order
             guard let self, self.generation == gen else { return }
             do {
+                self.markBusy()
+                defer { self.markDone() }
                 let result = try await tts.synthesizeAsync(text, options: SynthesisOptions(voiceId: voice))
                 guard self.generation == gen else { return }
                 self.schedule(result.samples, rate: result.sampleRateHz, id: id, gen: gen)
