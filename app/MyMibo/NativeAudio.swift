@@ -199,6 +199,8 @@ final class NativeAudio: NSObject {
             wakeOn(names: m["names"] as? [String] ?? ["mibo"])
         case "wakeOff":
             wakeOff()
+        case "captions":
+            TVMode.shared.showCaptions(you: m["you"] as? String ?? "", mibo: m["mibo"] as? String ?? "")
         case "state":
             TVMode.shared.show(state: m["state"] as? String ?? "idle", waitingForWake: (m["wake"] as? Bool) ?? false)
         default:

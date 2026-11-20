@@ -22,6 +22,15 @@ final class TVMode: ObservableObject {
     /// What Mibo is doing ("idle", "listening", "thinking", "speaking"), shown on the phone in TV mode.
     @Published private(set) var miboState = "idle"
     @Published private(set) var waitingForWake = false
+
+    /// The captions: Jim's words as he speaks, and Mibo's reply.
+    @Published private(set) var youText = ""
+    @Published private(set) var miboText = ""
+
+    func showCaptions(you: String, mibo: String) {
+        if you != youText { youText = you }
+        if mibo != miboText { miboText = mibo }
+    }
     private var idleTimer: DispatchWorkItem?
     private let buzz = UIImpactFeedbackGenerator(style: .medium)
 
@@ -151,22 +160,51 @@ struct TVPhoneScreen: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            TimelineView(.animation) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                VStack(spacing: 28) {
-                    sign(t)
-                        .frame(width: 180, height: 180)
-                    VStack(spacing: 8) {
-                        Text(title).font(.system(size: 34, weight: .semibold)).foregroundColor(titleColor)
-                        Text(subtitle).font(.title3).foregroundColor(Color(white: 0.5))
-                    }
-                    .multilineTextAlignment(.center)
+            VStack(spacing: 22) {
+                Spacer(minLength: 20)
+                TimelineView(.animation) { timeline in
+                    sign(timeline.date.timeIntervalSinceReferenceDate)
                 }
+                .frame(width: 150, height: 150)
+                VStack(spacing: 6) {
+                    Text(title).font(.system(size: 32, weight: .semibold)).foregroundColor(titleColor)
+                    Text(subtitle).font(.title3).foregroundColor(Color(white: 0.5))
+                }
+                .multilineTextAlignment(.center)
+                captions
+                Spacer(minLength: 20)
             }
+            .padding(.horizontal, 24)
         }
         .contentShape(Rectangle())
         .onTapGesture { TVMode.shared.tapFace() }
         .animation(.easeInOut(duration: 0.25), value: tv.miboState)
+    }
+
+    /// What Jim is saying, then Mibo's reply. Long text shows its newest lines.
+    @ViewBuilder
+    private var captions: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !tv.youText.isEmpty {
+                caption(label: "You", text: tv.youText, color: Color(white: 0.85), lines: 3)
+            }
+            if !tv.miboText.isEmpty {
+                caption(label: "Mibo", text: tv.miboText, color: orange, lines: 7)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.2), value: tv.youText.isEmpty)
+    }
+
+    private func caption(label: String, text: String, color: Color, lines: Int) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased()).font(.caption.weight(.semibold)).foregroundColor(Color(white: 0.4))
+            Text(text)
+                .font(.title3)
+                .foregroundColor(color)
+                .lineLimit(lines)
+                .truncationMode(.head)   // keep the newest words in view
+        }
     }
 
     private var title: String {
