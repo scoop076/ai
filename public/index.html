@@ -920,6 +920,16 @@ body.no-captions .captions { visibility: hidden; }
     // (/mˌibˈO/) instead of two separate ones ("mi bo" left a gap between them).
     [/\bMibo\b/gi, "mi-bo"],
   ];
+  // Mibo's built-in (Kokoro) voice can take exact sounds as [word](/sounds/). Used only for that voice,
+  // since Apple's voices would read the brackets out loud. Set to false to switch it off.
+  const EXACT_SOUNDS = true;
+  const KOKORO_SAY = [
+    [/\bmi-bo\b/gi, "[Mibo](/mˈibO/)"],     // "MEE-bo": stress on MEE, a light o at the end
+  ];
+  function forKokoro(s) {
+    if (EXACT_SOUNDS) for (const [word, say] of KOKORO_SAY) s = s.replace(word, say);
+    return s;
+  }
   function pronounce(s) {
     s = s.replace(LIVE_AFTER, (m, lead, w) => lead + LYVE(w)).replace(LIVE_ON, (w) => LYVE(w));
     for (const [word, say] of SAY_AS) s = s.replace(word, say);
@@ -971,7 +981,8 @@ body.no-captions .captions { visibility: hidden; }
         end: () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); },
       };
       // Mibo's built-in voice: the slider's default spot (1.2) is its normal speed; left is slower, right faster.
-      toApp({ type: "say", id, text, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), kokoroRate: speechRate() / 1.2, rate: speechRate() });
+      const said = kokoro.status === "ready" ? forKokoro(text) : text;   // exact sounds only when the built-in voice will speak
+      toApp({ type: "say", id, text: said, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), kokoroRate: speechRate() / 1.2, rate: speechRate() });
       return;
     }
     if (!("speechSynthesis" in window)) return;
