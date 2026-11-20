@@ -57,6 +57,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     // Playback: one player node fed 24 kHz mono float buffers, one per sentence.
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
+    private let speed = AVAudioUnitTimePitch()   // the "Speaking speed" slider, applied as Mibo talks
     private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
     private var queue: [String] = []           // sentence ids not yet finished, in speaking order
     private var scheduled = Set<String>()      // ids whose audio is already queued on the player
@@ -67,8 +68,11 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
 
     private override init() {
         super.init()
+        // player → speed control (keeps the pitch natural) → speaker
         engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
+        engine.attach(speed)
+        engine.connect(node, to: speed, format: format)
+        engine.connect(speed, to: engine.mainMixerNode, format: format)
     }
 
     private var folder: URL {
@@ -245,8 +249,9 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     /// Speak one sentence. Sentences play in the order they arrive. Each sentence is streamed:
     /// its first phrase starts playing while the rest is still being made, so Mibo starts
     /// talking sooner. The page hears "sayStart" when a sentence begins and "spoke" when it ends.
-    func speak(id: String, text: String, voice: String, token: Int) {
+    func speak(id: String, text: String, voice: String, token: Int, rate: Float = 1) {
         guard token == generation else { return }   // stopped while the audio was waking up
+        speed.rate = max(0.5, min(2.0, rate))       // takes effect right away, pitch unchanged
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
         guard let tts else { onEvent?(["type": "spoke", "id": id]); return }
         queue.append(id)

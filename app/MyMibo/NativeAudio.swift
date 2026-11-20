@@ -194,7 +194,7 @@ final class NativeAudio: NSObject {
         case "say":
             let rate = (m["rate"] as? NSNumber)?.floatValue ?? 1
             say(id: id, text: m["text"] as? String ?? "", voice: m["voice"] as? String ?? "", rate: rate,
-                kokoroVoice: m["kokoro"] as? String ?? "")
+                kokoroVoice: m["kokoro"] as? String ?? "", kokoroRate: (m["kokoroRate"] as? NSNumber)?.floatValue ?? 1)
         case "stopSay":
             synth.stopSpeaking(at: .immediate)
             KokoroVoice.shared.stop()
@@ -526,12 +526,12 @@ final class NativeAudio: NSObject {
         voices = list
     }
 
-    private func say(id: String, text: String, voice: String, rate: Float, kokoroVoice: String) {
+    private func say(id: String, text: String, voice: String, rate: Float, kokoroVoice: String, kokoroRate: Float) {
         // Mibo's built-in voice when it's ready; Apple's voice until then.
         if KokoroVoice.shared.isReady, !kokoroVoice.isEmpty {
             pauseWake()
             let token = KokoroVoice.shared.token   // if speech is stopped before the audio wakes, skip this sentence
-            whenActive { KokoroVoice.shared.speak(id: id, text: text, voice: kokoroVoice, token: token) }
+            whenActive { KokoroVoice.shared.speak(id: id, text: text, voice: kokoroVoice, token: token, rate: kokoroRate) }
             return
         }
         let u = AVSpeechUtterance(string: text)
