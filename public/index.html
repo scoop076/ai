@@ -233,6 +233,7 @@ body.no-captions .captions { visibility: hidden; }
       <input id="deviceIn" type="text" placeholder="For example: Studio Mac" autocomplete="off" spellcheck="false" maxlength="40">
     </label>
     <p class="hint" id="deviceHint"></p>
+    <button class="quiet" id="reloadBtn" type="button">Reload Mibo</button>
     <h3>Conversation</h3>
     <label for="stayIn">Keep listening after I'm activated
       <select id="stayIn">
@@ -455,6 +456,8 @@ body.no-captions .captions { visibility: hidden; }
       const r = await fetch("/api/config", { cache: "no-store" });
       if (r.ok) { const c = await r.json(); srvClaude = !!c.claude; srvEleven = !!c.eleven; srvMemory = !!c.memory; changesEnabled = !!c.changes; srvAura = !!c.aura; }
     } catch {}
+    currentVersion().then((v) => { loadedVersion = v; });
+    setInterval(checkForNewVersion, 60000);
     if (changesEnabled) {
       pageSignature().then((sig) => { pageSig = sig; }).catch(() => {});
       currentVersion().then((v) => { versionAtLoad = v; });
@@ -477,8 +480,10 @@ body.no-captions .captions { visibility: hidden; }
     if (!canListen) { setState("nomic"); return; }
     setState("idle");
     const resuming = (() => { try { return !!sessionStorage.getItem("frame.resume"); } catch { return false; } })();
+    const quietReload = (() => { try { const q = sessionStorage.getItem("frame.quietReload"); sessionStorage.removeItem("frame.quietReload"); return !!q; } catch { return false; } })();
     resumeAfterReload();
-    if (!resuming) setTimeout(autoListen, 900);   // the app starts listening as soon as it opens
+    if (quietReload) showNote("I updated myself to the latest version.", 4000);
+    else if (!resuming) setTimeout(autoListen, 900);   // the app starts listening as soon as it opens
   }
   /* In the app, opening it (or coming back to it) starts listening right away, as if the face were tapped.
      When the conversation window runs out, Mibo goes back to waiting for "Hey Mibo". */
@@ -1284,7 +1289,7 @@ body.no-captions .captions { visibility: hidden; }
       body: JSON.stringify({ elVoice: settings.elVoice, elModel: settings.elModel, rate: Number(settings.rate), engine: settings.engine || undefined, auraVoice: settings.auraVoice }),
     }).catch(() => {});
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { pullPrefs(); if (state === "idle") setTimeout(APP ? autoListen : armWake, 600); } else if (APP) { wakeArmed = false; sessionUntil = 0; } else disarmWake(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { pullPrefs(); if (state === "idle") setTimeout(async () => { if (state === "idle" && await newVersionAvailable()) { location.reload(); return; } (APP ? autoListen : armWake)(); }, 600); } else if (APP) { wakeArmed = false; sessionUntil = 0; } else disarmWake(); });
   $("#elVoiceSel").addEventListener("change", pushPrefs);
   $("#engineSel").addEventListener("change", (e) => {
     settings.engine = e.target.value; store.set("engine", settings.engine);
@@ -1426,6 +1431,24 @@ body.no-captions .captions { visibility: hidden; }
     try { const r = await fetch("/api/version", { cache: "no-store" }); const j = await r.json(); return j.id || null; }
     catch { return null; }
   }
+  /* Pick up new versions on its own, since pull-to-reload can't work on this page (it never scrolls):
+     every minute, and whenever the app comes back, check whether a new version was deployed.
+     If one was, reload while Mibo is quiet, then carry on as before. */
+  let loadedVersion = null;
+  async function newVersionAvailable() {
+    const v = await currentVersion();
+    if (!v) return false;
+    if (!loadedVersion) { loadedVersion = v; return false; }
+    return v !== loadedVersion;
+  }
+  async function checkForNewVersion() {
+    if (watchingForUpdate || document.hidden || state !== "idle" || !sheet.hidden) return;
+    if (!(await newVersionAvailable())) return;
+    if (state !== "idle" || !sheet.hidden) return;          // something started while checking; try again next minute
+    try { sessionStorage.setItem("frame.quietReload", "1"); } catch {}
+    location.reload();
+  }
+
   // After a change is published, wait for Cloudflare to finish deploying it,
   // say so out loud, then reload into the new version.
   function watchForUpdate() {
@@ -1535,6 +1558,7 @@ body.no-captions .captions { visibility: hidden; }
     $("#elHint").textContent = "Key saved on this device. Loading voices...";
     loadElVoices();
   });
+  $("#reloadBtn").addEventListener("click", () => { location.reload(); });
   $("#testVoiceBtn").addEventListener("click", () => {
     unlockAudio(); ensureAudio();
     if (state === "speaking" || state === "thinking") interrupt();
