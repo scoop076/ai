@@ -170,6 +170,25 @@ print(os.listdir("negative_datasets"))
 """)
 
 code("""
+# 7b. Use less memory when checking progress during training (free Colab has about 12 GB).
+p = "microWakeWord/microwakeword/data.py"
+s = open(p).read()
+old = \"\"\"                for spectrogram in generator:
+                    data.append(spectrogram)\"\"\"
+new = \"\"\"                for n, spectrogram in enumerate(generator):
+                    if n >= 8000 and mode in ("validation", "testing"):
+                        break
+                    data.append(spectrogram)\"\"\"
+if "n >= 8000" in s:
+    print("Already done.")
+elif old in s:
+    open(p, "w").write(s.replace(old, new))
+    print("Done.")
+else:
+    print("Couldn't find the spot to change. Send Claude a screenshot.")
+""")
+
+code("""
 # 8. Train (about an hour on a T4; Colab may look stuck for minutes at a time).
 import yaml
 config = {
