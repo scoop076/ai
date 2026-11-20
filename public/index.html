@@ -404,7 +404,7 @@ body.no-captions .captions { visibility: hidden; }
   let ctl = null, turn = 0;
   let heard = "", partial = "", endTimer = 0, silenceTimer = 0, submitted = false, rec = null;
   let replyText = "", spokenUpTo = 0, streamDone = true, queued = 0, pushedReply = true;
-  let t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0, testing = false;
+  let tText = 0, t0 = 0, firstAudio = false, sysSpeaking = 0, kick = 0, testing = false;
   let actx = null, analyser = null, ampBuf = null, curSource = null, playChain = Promise.resolve(), gen = 0;
   let elSpeaking = false, elFailed = false;
   let srvClaude = false, srvEleven = false, srvMemory = false, changesEnabled = false, srvAura = false, auraFailedAt = 0;
@@ -824,11 +824,11 @@ body.no-captions .captions { visibility: hidden; }
     setState("thinking");
     history.push({ role: "user", content: text });
     replyText = ""; spokenUpTo = 0; streamDone = false; queued = 0; pushedReply = false;
-    t0 = performance.now(); firstAudio = false; latEl.textContent = "";
+    t0 = performance.now(); tText = 0; firstAudio = false; latEl.textContent = "";
     ctl = new AbortController();
     try {
       const full = await streamClaude(buildMessages(), ctl.signal, (t) => {
-        if (my !== turn) return; replyText = t; claudeEl.textContent = t; pump(false);
+        if (my !== turn) return; if (!tText) tText = performance.now(); replyText = t; claudeEl.textContent = t; pump(false);
       });
       if (my !== turn) return;
       replyText = full; claudeEl.textContent = full;
@@ -863,6 +863,11 @@ body.no-captions .captions { visibility: hidden; }
       const chunk = rest.slice(last, m.index + m[0].length);
       if (chunk.trim().length > 1) speakChunk(chunk);
       last = m.index + m[0].length;
+    }
+    if (!final && spokenUpTo === 0 && last === 0) {
+      // The very first words of a reply: don't wait for the whole sentence, start at the first comma.
+      const c = rest.indexOf(", ", 18);
+      if (c > 0 && c < 140) { speakChunk(rest.slice(0, c + 1)); last = c + 2; }
     }
     if (!final && rest.length - last > 150) {
       const c = rest.lastIndexOf(", ");
@@ -1144,7 +1149,10 @@ body.no-captions .captions { visibility: hidden; }
     if (state === "thinking" || state === "speaking") setState("speaking");
     if (!firstAudio && t0) {
       firstAudio = true;
-      latEl.textContent = "First word in " + ((performance.now() - t0) / 1000).toFixed(1) + " s";
+      const now = performance.now();
+      latEl.textContent = tText
+        ? "Reply started in " + ((tText - t0) / 1000).toFixed(1) + " s · voice in " + ((now - tText) / 1000).toFixed(1) + " s more"
+        : "First word in " + ((now - t0) / 1000).toFixed(1) + " s";
     }
   }
   function maybeFinish() {
