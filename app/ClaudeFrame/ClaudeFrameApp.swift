@@ -1,4 +1,4 @@
-// Claude Frame for iPad and iPhone.
+// My Mibo for iPad and iPhone.
 //
 // A full-screen shell around https://ai.liljimjim.com. The page keeps the
 // face, memory, voices and self-updates; this app owns the microphone, speech
@@ -15,7 +15,7 @@ struct ClaudeFrameApp: App {
         WindowGroup {
             FrameWebView()
                 .ignoresSafeArea()
-                .background(Color.black)
+                .background(Color(red: 217/255, green: 119/255, blue: 21/255))   // Mibo's orange, so nothing dark shows while the page loads
                 .statusBarHidden(true)
                 .persistentSystemOverlays(.hidden)
                 .onAppear { UIApplication.shared.isIdleTimerDisabled = true }

@@ -179,9 +179,9 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Claude Frame";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Claude Frame listens when you tap its face so you can talk to it.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Claude Frame turns what you say into words so it can answer you.";
+				INFOPLIST_KEY_CFBundleDisplayName = "My Mibo";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Mibo listens when you tap its face or say \"Hey Mibo\" so you can talk to it.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Mibo turns what you say into words so it can answer you.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -211,9 +211,9 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Claude Frame";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Claude Frame listens when you tap its face so you can talk to it.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Claude Frame turns what you say into words so it can answer you.";
+				INFOPLIST_KEY_CFBundleDisplayName = "My Mibo";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Mibo listens when you tap its face or say \"Hey Mibo\" so you can talk to it.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Mibo turns what you say into words so it can answer you.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
