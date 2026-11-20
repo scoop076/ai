@@ -915,7 +915,7 @@ body.no-captions .captions { visibility: hidden; }
   // Add more as they come up: [the word, how to spell it so it sounds right].
   const SAY_AS = [
     [/\bCollinsville\b/gi, "Collinsvil"],     // not "Collins-vill-ah"
-    [/\bMibo\b/gi, "Meebo"],                  // Mibo's own name, not "Miba"
+    [/\bMibo\b/gi, "Mee-Bo"],                 // Mibo's own name: "Mee-boh", long o (not "Miba"; "Meebo" still ended in "uh")
   ];
   function pronounce(s) {
     s = s.replace(LIVE_AFTER, (m, lead, w) => lead + LYVE(w)).replace(LIVE_ON, (w) => LYVE(w));
