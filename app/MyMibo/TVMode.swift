@@ -19,6 +19,31 @@ final class TVMode: ObservableObject {
     /// True while Mibo is showing on the TV.
     @Published private(set) var active = false
 
+    /// What Mibo is doing ("idle", "listening", "thinking", "speaking"), shown on the phone in TV mode.
+    @Published private(set) var miboState = "idle"
+    @Published private(set) var waitingForWake = false
+    private var idleTimer: DispatchWorkItem?
+    private let buzz = UIImpactFeedbackGenerator(style: .medium)
+
+    /// Called with each change the page reports. A gentle buzz marks "your turn to talk".
+    func show(state: String, waitingForWake wake: Bool) {
+        idleTimer?.cancel()
+        if state == "idle" && !wake {
+            // Mibo passes through "idle" for a moment between turns; don't flash it.
+            let work = DispatchWorkItem { [weak self] in self?.apply("idle", wake: false) }
+            idleTimer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+            return
+        }
+        apply(state, wake: wake)
+    }
+
+    private func apply(_ state: String, wake: Bool) {
+        if state == "listening" && miboState != "listening" && active { buzz.impactOccurred() }
+        miboState = state
+        waitingForWake = wake
+    }
+
     private weak var web: WKWebView?
     private weak var home: UIView?        // where the web view lives on this device
     private var tvWindow: UIWindow?
@@ -115,30 +140,92 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
-/// What this device shows while Mibo is on the TV: black, with a small dim dot.
+/// What this device shows while Mibo is on the TV: mostly black (pixels off on an OLED iPhone),
+/// with a clear sign of what Mibo is doing so Jim knows when to talk. Tap anywhere = tap Mibo's face.
 struct TVPhoneScreen: View {
-    @State private var showHint = false
+    @ObservedObject private var tv = TVMode.shared
+
+    private let orange = Color(red: 217/255, green: 119/255, blue: 21/255)
+    private let teal = Color(red: 143/255, green: 211/255, blue: 200/255)
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            Circle()
-                .fill(Color(red: 217/255, green: 119/255, blue: 21/255))
-                .frame(width: 10, height: 10)
-                .opacity(0.45)
-            if showHint {
-                Text("Mibo is on your TV.\nSay \u{201C}Hey Mibo\u{201D} or tap to talk.")
-                    .font(.title3)
+            TimelineView(.animation) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                VStack(spacing: 28) {
+                    sign(t)
+                        .frame(width: 180, height: 180)
+                    VStack(spacing: 8) {
+                        Text(title).font(.system(size: 34, weight: .semibold)).foregroundColor(titleColor)
+                        Text(subtitle).font(.title3).foregroundColor(Color(white: 0.5))
+                    }
                     .multilineTextAlignment(.center)
-                    .foregroundColor(Color(white: 0.55))
-                    .offset(y: 70)
+                }
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            TVMode.shared.tapFace()
-            showHint = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { showHint = false }
+        .onTapGesture { TVMode.shared.tapFace() }
+        .animation(.easeInOut(duration: 0.25), value: tv.miboState)
+    }
+
+    private var title: String {
+        switch tv.miboState {
+        case "listening": return "Listening"
+        case "thinking": return "Thinking\u{2026}"
+        case "speaking": return "Mibo is talking"
+        default: return tv.waitingForWake ? "Say \u{201C}Hey Mibo\u{201D}" : "Tap to talk"
+        }
+    }
+
+    private var subtitle: String {
+        switch tv.miboState {
+        case "listening": return "Go ahead and talk. Tap to stop."
+        case "thinking": return "One moment"
+        case "speaking": return "Tap to interrupt"
+        default: return "Mibo is on your TV"
+        }
+    }
+
+    private var titleColor: Color {
+        switch tv.miboState {
+        case "listening": return teal
+        case "thinking", "speaking": return orange
+        default: return Color(white: 0.45)
+        }
+    }
+
+    @ViewBuilder
+    private func sign(_ t: TimeInterval) -> some View {
+        switch tv.miboState {
+        case "listening":
+            // A bright teal ring that breathes, with ripples moving out: "your turn".
+            ZStack {
+                ForEach(0..<2, id: \.self) { i in
+                    let p = (t * 0.7 + Double(i) * 0.5).truncatingRemainder(dividingBy: 1)
+                    Circle().stroke(teal.opacity(0.6 * (1 - p)), lineWidth: 3).scaleEffect(0.55 + 0.45 * p)
+                }
+                Circle().fill(teal).frame(width: 70, height: 70).scaleEffect(1 + 0.08 * sin(t * 4))
+            }
+        case "thinking":
+            // Three orange dots taking turns.
+            HStack(spacing: 18) {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle().fill(orange).frame(width: 22, height: 22)
+                        .opacity(0.3 + 0.7 * max(0, sin(t * 4 - Double(i) * 0.9)))
+                }
+            }
+        case "speaking":
+            // Orange bars moving like a voice.
+            HStack(spacing: 10) {
+                ForEach(0..<5, id: \.self) { i in
+                    Capsule().fill(orange)
+                        .frame(width: 14, height: 30 + 60 * abs(sin(t * 5 + Double(i) * 1.3)))
+                }
+            }
+        default:
+            // Resting: a small dim dot.
+            Circle().fill(orange).frame(width: 12, height: 12).opacity(tv.waitingForWake ? 0.5 : 0.3)
         }
     }
 }
