@@ -1629,12 +1629,12 @@ body.no-captions .captions { visibility: hidden; }
       ctx.fillStyle = "#e58a98"; ctx.fillRect(-L - R * 0.13, -w, R * 0.08, w * 2);
     } else if (acc === "glasses") {
       ctx.strokeStyle = "#6b4a22"; ctx.lineWidth = R * 0.026;
-      const pts = [-1, 1].map((side) => [cx + side * R * 0.34 + gaze.x * R * 0.12, cy - R * 0.06 + gaze.y * R * 0.1]);
-      for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x, y, R * 0.17, 0, TAU); ctx.stroke(); }
-      ctx.beginPath(); ctx.arc((pts[0][0] + pts[1][0]) / 2, pts[0][1] - R * 0.02, R * 0.09, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+      const pts = [-1, 1].map((side) => [cx + side * R * 0.37 + gaze.x * R * 0.12, cy - R * 0.12 + gaze.y * R * 0.1]);
+      for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x, y, R * 0.25, 0, TAU); ctx.stroke(); }
+      ctx.beginPath(); ctx.arc((pts[0][0] + pts[1][0]) / 2, pts[0][1] - R * 0.02, R * 0.12, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
       ctx.strokeStyle = "rgba(201,162,92,0.7)"; ctx.lineWidth = R * 0.01;
       for (const s of [-1, 1]) {
-        ctx.beginPath(); ctx.moveTo(pts[s < 0 ? 0 : 1][0] + s * R * 0.17, pts[0][1]);
+        ctx.beginPath(); ctx.moveTo(pts[s < 0 ? 0 : 1][0] + s * R * 0.25, pts[0][1]);
         ctx.quadraticCurveTo(cx + s * R * 0.95, cy + R * 0.9, cx + s * R * 0.3, cy + R * 1.2); ctx.stroke();
       }
     }
@@ -1697,10 +1697,12 @@ body.no-captions .captions { visibility: hidden; }
       }
     }
 
-    const ew = R * 0.14, eh = R * 0.24 * lid * (1 + 0.12 * listenAmt);
+    // Big eyes set wide, with the smile tucked between them (Jim's layout).
+    const ew = R * 0.21, eh = R * 0.4 * lid * (1 + 0.1 * listenAmt);
+    const eyeY = cy - R * 0.12;
     for (const side of [-1, 1]) {
-      const x = cx + side * R * 0.34 + gaze.x * R * 0.12;
-      const y = cy - R * 0.1 + gaze.y * R * 0.1;
+      const x = cx + side * R * 0.37 + gaze.x * R * 0.12;
+      const y = eyeY + gaze.y * R * 0.1;
       ctx.fillStyle = C.eye;
       ctx.beginPath(); ctx.ellipse(x, y, ew / 2, Math.max(1.5, eh / 2), 0, 0, TAU); ctx.fill();
       if (lid > 0.4) {
@@ -1709,7 +1711,7 @@ body.no-captions .captions { visibility: hidden; }
       }
     }
 
-    const mx = cx + gaze.x * R * 0.05, my = cy + R * 0.36 + gaze.y * R * 0.04;
+    const mx = cx + gaze.x * R * 0.05, my = eyeY + R * 0.25 + gaze.y * R * 0.04;   // between the eyes, level with their lower half
     const open = Math.min(1, mouth * 1.6);
     if (open < 0.98) {
       ctx.strokeStyle = rgba(C.eye, 1 - open);
