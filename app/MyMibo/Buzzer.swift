@@ -25,19 +25,23 @@ final class Buzzer {
         }
     }
 
-    /// Two firm taps: "your turn".
-    func yourTurn() { play(at: [0, 0.13], intensity: 1.0, sharpness: 0.7, why: "your turn") }
+    /// Two strong pulses, hard to miss: "your turn".
+    func yourTurn() { play(pulses: [0, 0.22], length: 0.14, intensity: 1.0, sharpness: 0.45, why: "your turn") }
 
-    /// One light tap: "got it".
-    func gotIt() { play(at: [0], intensity: 0.55, sharpness: 0.4, why: "got it") }
+    /// One firm tap: "got it".
+    func gotIt() { play(pulses: [0], length: 0.08, intensity: 0.85, sharpness: 0.5, why: "got it") }
 
-    private func play(at times: [TimeInterval], intensity: Float, sharpness: Float, why: String) {
+    // Each pulse is a short continuous buzz (stronger than a single tap) with a crisp tap at its start.
+    private func play(pulses: [TimeInterval], length: TimeInterval, intensity: Float, sharpness: Float, why: String) {
         guard let engine else { return }
-        let events = times.map { t in
-            CHHapticEvent(eventType: .hapticTransient, parameters: [
-                CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
-                CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
-            ], relativeTime: t)
+        let strength = [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
+        ]
+        var events: [CHHapticEvent] = []
+        for t in pulses {
+            events.append(CHHapticEvent(eventType: .hapticTransient, parameters: strength, relativeTime: t))
+            events.append(CHHapticEvent(eventType: .hapticContinuous, parameters: strength, relativeTime: t, duration: length))
         }
         do {
             try engine.start()
