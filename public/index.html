@@ -278,7 +278,7 @@ body.no-captions .captions { visibility: hidden; }
 <div class="below">
   <div class="captions" aria-live="polite">
     <div class="you" id="youText"></div>
-    <div class="claude" id="claudeText">Hello, Jim. Tap my face and say something.</div>
+    <div class="claude" id="claudeText"></div>
   </div>
   <div class="foot">
     <div class="placard">
@@ -462,6 +462,8 @@ body.no-captions .captions { visibility: hidden; }
   }
 
   async function init() {
+    // The app starts listening on its own, so only browsers (which need a first tap) get the greeting.
+    if (!APP) claudeEl.textContent = "Hello, Jim. Tap my face and say something.";
     try {
       const raw = sessionStorage.getItem("frame.updated");
       if (raw) {
