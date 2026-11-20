@@ -514,6 +514,9 @@ body.no-captions .captions { visibility: hidden; }
     if (quietReload) showNote("I updated myself to the latest version.", 4000);
     else if (!resuming) setTimeout(autoListen, 900);   // the app starts listening as soon as it opens
   }
+  // Car Mode (in the app) calls this to start listening, the same as opening the app.
+  window.miboListenNow = () => { if (state === "idle") autoListen(); };
+
   /* In the app, opening it (or coming back to it) starts listening right away, as if the face were tapped.
      When the conversation window runs out, Mibo goes back to waiting for "Hey Mibo". */
   function autoListen() {

@@ -12,6 +12,7 @@ struct MyMiboApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate   // hands an Apple TV to TV mode
     @Environment(\.scenePhase) private var phase
     @StateObject private var tv = TVMode.shared
+    @StateObject private var car = CarMode.shared
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +21,7 @@ struct MyMiboApp: App {
                     .ignoresSafeArea()
                     .background(Color(red: 217/255, green: 119/255, blue: 21/255))   // Mibo's orange, so nothing dark shows while the page loads
                 if tv.active { TVPhoneScreen() }   // Mibo is on the TV: this screen goes dark and acts as the mic
+                else if car.on { CarScreen() }     // Car Mode: big status and captions; dark in a pocket
             }
                 .statusBarHidden(true)
                 .persistentSystemOverlays(.hidden)

@@ -70,12 +70,21 @@ final class NativeAudio: NSObject {
     private let sessionQueue = DispatchQueue(label: "mymibo.audiosession", qos: .userInitiated)
     private var sessionReady = false
 
+    /// Car Mode: use the car's hands-free Bluetooth (its microphone and speakers).
+    private var carMode = false
+    func setCarMode(_ on: Bool) {
+        carMode = on
+        configureSession()
+    }
+
     private func configureSession() {
         sessionReady = true
         // AirPlay speakers are allowed only while the screen is mirrored (to an Apple TV),
         // so the voice follows the mirror, then comes back here when mirroring stops.
         var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .allowBluetoothA2DP]
         if isMirroring { options.insert(.allowAirPlay) }
+        if carMode { options.insert(.allowBluetooth) }   // hands-free profile: the car's mic as well as its speakers
+        let preferCar = carMode
         sessionQueue.async {
             let session = AVAudioSession.sharedInstance()
             do {
@@ -84,6 +93,9 @@ final class NativeAudio: NSObject {
                 // which blocked the "your turn" buzz. Allow it.
                 try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
                 try session.setActive(true)
+                // In Car Mode, listen through the car's microphone when it's connected; otherwise the phone's.
+                let carMic = preferCar ? session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) : nil
+                try? session.setPreferredInput(carMic)
             } catch {
                 print("My Mibo: audio setup failed: \(error)")
             }
