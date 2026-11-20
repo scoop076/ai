@@ -7,6 +7,7 @@
 // eleven  - preferred ElevenLabs voice names, in order (matched against Jim's account)
 // voiceHint - used when none of those names exist: {gender, accent, age}
 // aura    - free Cloudflare Aura voice for this character
+// apple   - Apple device voices to use, best first (the Premium version of each is used when downloaded)
 // look    - halo color and the accessory the face wears
 
 export const PERSONAS = {
@@ -16,6 +17,7 @@ export const PERSONAS = {
     greeting: "Ellis, at your service, sir. Everything is in hand. Well, nearly everything. What may I attend to?",
     eleven: ["George", "Daniel", "Harry"],
     voiceHint: { gender: "male", accent: "british" },
+    apple: ["Jamie", "Daniel", "Arthur", "Oliver"],
     aura: "draco",
     look: { glow: "#9fb6d8", acc: "bowtie" },
     prompt: [
@@ -35,6 +37,7 @@ export const PERSONAS = {
     greeting: "Ines here. Jim, the light in this room has potential. So do you. What are we making today?",
     eleven: ["Charlotte", "Matilda", "Laura", "Alice"],
     voiceHint: { gender: "female" },
+    apple: ["Serena", "Joelle", "Zoe"],
     aura: "harmonia",
     look: { glow: "#c79be0", acc: "beret" },
     prompt: [
@@ -54,6 +57,7 @@ export const PERSONAS = {
     greeting: "Good evening, or morning, or whatever it is out there. You're listening to W F R M, the frame on the wall. Hank Delaney here, and Jim's on the line. Go ahead, caller.",
     eleven: ["Brian", "Bill", "Chris"],
     voiceHint: { gender: "male", accent: "american", age: "middle" },
+    apple: ["Evan", "Nathan", "Tom"],
     aura: "zeus",
     look: { glow: "#e0786a", acc: "headphones" },
     prompt: [
@@ -73,6 +77,7 @@ export const PERSONAS = {
     greeting: "Walt here. You called? Don't tell me somebody used the cheap caulk again.",
     eleven: ["Bill", "Clyde", "Roger", "Eric"],
     voiceHint: { gender: "male", accent: "american", age: "old" },
+    apple: ["Tom", "Nathan", "Evan"],
     aura: "arcas",
     look: { glow: "#d9b45a", acc: "pencil" },
     prompt: [
@@ -92,6 +97,7 @@ export const PERSONAS = {
     greeting: "Margo here! I'd rate this reunion an 8.7. Points off only because I can't smell what you're cooking. Where are we going today?",
     eleven: ["Jessica", "Sarah", "Laura", "Lily"],
     voiceHint: { gender: "female", accent: "american" },
+    apple: ["Zoe", "Noelle", "Joelle"],
     aura: "thalia",
     look: { glow: "#f2b45c", acc: "glasses" },
     prompt: [
@@ -127,7 +133,7 @@ export function personaList() {
   return [{ id: "claude", name: "Claude", title: "Regular Claude" }].concat(
     PERSONA_IDS.map((id) => {
       const p = PERSONAS[id];
-      return { id, name: p.name, title: p.title, eleven: p.eleven, voiceHint: p.voiceHint, aura: p.aura, look: p.look };
+      return { id, name: p.name, title: p.title, eleven: p.eleven, voiceHint: p.voiceHint, aura: p.aura, apple: p.apple, look: p.look };
     }),
   );
 }

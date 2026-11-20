@@ -185,8 +185,10 @@ body.no-captions .captions { visibility: hidden; }
     <label for="personaSel">Who's in the frame
       <select id="personaSel"><option value="claude">Claude (regular)</option></select>
     </label>
-    <p class="hint" id="personaHint">Each personality has its own way of talking, its own voice and its own look. You can also just say "switch to Ellis" or "back to regular Claude".</p>
+    <p class="hint" id="personaHint">Each personality has its own way of talking, its own voice and its own look. Swipe the face left or right to switch. You can also just say "switch to Ellis" or "back to regular Claude".</p>
     <h3>Voice</h3>
+    <p class="hint" id="voiceNow"></p>
+    <div hidden>
     <label for="engineSel">Voice engine
       <select id="engineSel">
         <option value="eleven">ElevenLabs (most lifelike, uses credits)</option>
@@ -221,6 +223,7 @@ body.no-captions .captions { visibility: hidden; }
     <label for="voiceSel">This device's voice (also the backup)
       <select id="voiceSel"></select>
     </label>
+    </div>
     <label for="rateIn">Speaking speed
       <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.05">
     </label>
@@ -497,9 +500,22 @@ body.no-captions .captions { visibility: hidden; }
     if (settings.voice && list.some((v) => v.name === settings.voice)) sel.value = settings.voice;
     else { sel.value = list[0].name; settings.voice = list[0].name; }
   }
+  const CLAUDE_VOICES = ["Ava", "Zoe", "Evan"];
+  const voiceBase = (n) => String(n).replace(/\s*·.*$/, "").replace(/\s*\((premium|enhanced)\)/i, "").replace(/\s*\(.*\)$/, "").trim().toLowerCase();
+  const voiceTier = (n) => /premium/i.test(n) ? 2 : /enhanced/i.test(n) ? 1 : 0;
   function currentVoice() {
     const list = systemVoices();
-    return list.find((v) => v.name === settings.voice) || list.sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
+    const p = personaOf(persona);
+    const names = (p && p.apple && p.apple.length) ? p.apple : CLAUDE_VOICES;
+    for (const name of names) {
+      const found = list.filter((v) => voiceBase(v.name) === name.toLowerCase()).sort((a, b) => voiceTier(b.name) - voiceTier(a.name));
+      if (found.length) return found[0];
+    }
+    return list.slice().sort((a, b) => rankVoice(b) - rankVoice(a))[0] || null;
+  }
+  function showVoiceInUse() {
+    const v = currentVoice(), el = $("#voiceNow");
+    if (el) el.textContent = v ? "Speaking with: " + v.name + (voiceTier(v.name) ? "" : ". For a more natural sound, download the Premium version in Settings → Accessibility → Read & Speak → Voices.") : "";
   }
 
   /* ---------- listening (Safari speech recognition) ---------- */
@@ -842,6 +858,7 @@ body.no-captions .captions { visibility: hidden; }
   const AURA_VOICES = ["luna", "thalia", "andromeda", "helena", "aurora", "athena", "asteria", "cora", "delia", "iris", "juno", "minerva", "ophelia", "phoebe", "theia", "vesta", "amalthea", "callista", "cordelia", "electra", "harmonia", "hera", "pandora",
     "apollo", "orion", "arcas", "aries", "atlas", "draco", "hermes", "hyperion", "janus", "jupiter", "mars", "neptune", "odysseus", "orpheus", "pluto", "saturn", "zeus"];
   function engine() {
+    return "device";   // for now every character speaks with Apple's device voices (free); the other engines stay in the code for later
     if (settings.engine === "device") return "device";
     if (settings.engine === "aura") return srvAura ? "aura" : "device";
     if (settings.engine === "eleven") return haveEleven() ? "eleven" : (srvAura ? "aura" : "device");
@@ -1028,6 +1045,7 @@ body.no-captions .captions { visibility: hidden; }
     personaEl = p && p.id !== "claude" ? pickElVoice(p) : null;
     personaAura = p && p.aura ? p.aura : null;
     look.target = p && p.look ? p.look : null;
+    try { showVoiceInUse(); } catch {}
     const sel = $("#personaSel");
     if (sel && [...sel.options].some((o) => o.value === persona)) sel.value = persona;
     if (!quiet) elFailed = false;
@@ -1202,7 +1220,7 @@ body.no-captions .captions { visibility: hidden; }
     if (e.key === "Escape") sheet.hidden = true;
   });
 
-  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); pollChanges(); } });
+  $("#gearBtn").addEventListener("click", (e) => { e.stopPropagation(); sheet.hidden = !sheet.hidden; if (!sheet.hidden) { pullPrefs(); loadMemory(); pollChanges(); showVoiceInUse(); } });
 
   /* ---------- shared voice settings (same on every screen) ---------- */
   async function pullPrefs() {
