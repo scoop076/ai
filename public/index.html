@@ -915,7 +915,9 @@ body.no-captions .captions { visibility: hidden; }
   // Add more as they come up: [the word, how to spell it so it sounds right].
   const SAY_AS = [
     [/\bCollinsville\b/gi, "Collinsvil"],     // not "Collins-vill-ah"
-    [/\bMibo\b/gi, "Mee-Bo"],                 // Mibo's own name: "Mee-boh", long o (not "Miba"; "Meebo" still ended in "uh")
+    // Mibo's own name, "MEE-boh". The voice doesn't know "Mibo" (or "Meebo"/"Mee-Bo") and guesses "Mibah",
+    // but its dictionary has "mi" (the music note, MEE) and "bo" (BOH, long o), so spell it as those two.
+    [/\bMibo\b/gi, "mi bo"],
   ];
   function pronounce(s) {
     s = s.replace(LIVE_AFTER, (m, lead, w) => lead + LYVE(w)).replace(LIVE_ON, (w) => LYVE(w));
