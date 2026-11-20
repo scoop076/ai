@@ -186,8 +186,9 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
 
     // MARK: - Speaking
 
-    /// Speak one sentence. Sentences play in the order they arrive; the page hears
-    /// "sayStart" when each one begins and "spoke" when it ends (or is skipped).
+    /// Speak one sentence. Sentences play in the order they arrive. Each sentence is streamed:
+    /// its first phrase starts playing while the rest is still being made, so Mibo starts
+    /// talking sooner. The page hears "sayStart" when a sentence begins and "spoke" when it ends.
     func speak(id: String, text: String, voice: String, token: Int) {
         guard token == generation else { return }   // stopped while the audio was waking up
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
@@ -196,54 +197,81 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         let gen = generation
         let previous = chain
         chain = Task { @MainActor [weak self] in
-            await previous?.value                     // synthesize in order
+            await previous?.value                     // make sentences in order
             guard let self, self.generation == gen else { return }
+            var gotAudio = false
+            self.markBusy()
+            defer { self.markDone() }
             do {
-                self.markBusy()
-                defer { self.markDone() }
-                let result = try await tts.synthesizeAsync(text, options: SynthesisOptions(voiceId: voice))
-                guard self.generation == gen else { return }
-                self.schedule(result.samples, rate: result.sampleRateHz, id: id, gen: gen)
+                for try await chunk in tts.synthesizeStream(text, options: SynthesisOptions(voiceId: voice)) {
+                    guard self.generation == gen else { return }
+                    if self.enqueue(chunk.samples, rate: chunk.sampleRateHz, id: id, gen: gen) { gotAudio = true }
+                }
             } catch {
                 guard self.generation == gen else { return }
                 print("My Mibo: couldn't speak a sentence: \(error)")
-                self.finished(id)                     // skip it rather than stall
             }
+            guard self.generation == gen else { return }
+            self.streamEnded(id, gotAudio: gotAudio)
         }
         #else
         onEvent?(["type": "spoke", "id": id])
         #endif
     }
 
-    private func schedule(_ samples: [Float], rate: Int, id: String, gen: Int) {
+    private var pending: [String: Int] = [:]   // buffers of each sentence still to play
+    private var ended = Set<String>()           // sentences whose audio is all made
+    private var started = Set<String>()         // sentences the page was told have started
+
+    /// Queue one phrase of audio. Returns false if it couldn't be played.
+    private func enqueue(_ samples: [Float], rate: Int, id: String, gen: Int) -> Bool {
         guard !samples.isEmpty, rate == 0 || rate == 24000,
               let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
-              let ch = buf.floatChannelData?[0] else { finished(id); return }
+              let ch = buf.floatChannelData?[0] else { return false }
         buf.frameLength = AVAudioFrameCount(samples.count)
         for i in 0..<samples.count {
             let s = samples[i]
             ch[i] = s.isFinite ? max(-1, min(1, s)) : 0
         }
         if !engine.isRunning {
-            do { try engine.start() } catch { print("My Mibo: voice playback failed: \(error)"); finished(id); return }
+            do { try engine.start() } catch { print("My Mibo: voice playback failed: \(error)"); return false }
         }
         if !node.isPlaying { node.play() }
+        pending[id, default: 0] += 1
         scheduled.insert(id)
-        if queue.first == id { onEvent?(["type": "sayStart", "id": id]) }
+        announceStartIfFirst()
         node.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.generation == gen else { return }
-                self.finished(id)
+                self.pending[id, default: 1] -= 1
+                self.finishIfDone(id)
             }
         }
+        return true
+    }
+
+    private func streamEnded(_ id: String, gotAudio: Bool) {
+        ended.insert(id)
+        if gotAudio { finishIfDone(id) } else { finished(id) }   // nothing to play: skip it rather than stall
+    }
+
+    private func finishIfDone(_ id: String) {
+        if ended.contains(id), (pending[id] ?? 0) <= 0 { finished(id) }
+    }
+
+    /// Tell the page the sentence at the front has started, once its audio is playing.
+    private func announceStartIfFirst() {
+        guard let first = queue.first, scheduled.contains(first), !started.contains(first) else { return }
+        started.insert(first)
+        onEvent?(["type": "sayStart", "id": first])
     }
 
     private func finished(_ id: String) {
         guard let i = queue.firstIndex(of: id) else { return }
         queue.remove(at: i)
-        scheduled.remove(id)
+        scheduled.remove(id); pending[id] = nil; ended.remove(id); started.remove(id)
         onEvent?(["type": "spoke", "id": id])
-        if let next = queue.first, scheduled.contains(next) { onEvent?(["type": "sayStart", "id": next]) }
+        announceStartIfFirst()
     }
 
     /// Stop talking right away and drop anything still waiting.
@@ -257,7 +285,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         node.stop()
         let dropped = queue
         queue.removeAll()
-        scheduled.removeAll()
+        scheduled.removeAll(); pending.removeAll(); ended.removeAll(); started.removeAll()
         for id in dropped { onEvent?(["type": "spoke", "id": id]) }
     }
 }
