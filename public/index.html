@@ -18,9 +18,9 @@
 :root {
   --wall: #16151c;         /* deep slate with a violet bias, like a dim wall */
   --wall-raised: #221f2b;
-  --glow: #f6b289;         /* the portrait's warm light */
-  --glow-deep: #c8684f;
-  --glow-pale: #ffe1c7;
+  --glow: #d97715;         /* the portrait's warm light */
+  --glow-deep: #a95d10;
+  --glow-pale: #eaa766;
   --eye: #2b1f27;
   --listen: #8fd3c8;       /* soft teal ring while listening */
   --ink: #ece6f1;
@@ -1630,7 +1630,7 @@ body.no-captions .captions { visibility: hidden; }
     const cx = W / 2, cy = faceTop + faceH * 0.52, R = Math.max(40, Math.min(W, faceH) * 0.28);
 
     // Every personality keeps the same warm orange glow; only its accessory changes.
-    const wantAcc = look.target ? look.target.acc : "bow";
+    const wantAcc = look.target ? look.target.acc : null;   // regular Claude wears nothing; only the personalities have accessories
     if (look.acc !== wantAcc) { look.accAmt = ease(look.accAmt, 0, 7, dt); if (look.accAmt < 0.03) look.acc = wantAcc; }
     else look.accAmt = ease(look.accAmt, wantAcc ? 1 : 0, 3, dt);
     // The warm glow fills the whole screen, pale near the face and deeper toward the edges.
