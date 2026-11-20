@@ -57,3 +57,16 @@ The device's own screen goes black with a small dim dot and keeps listening
 for "Hey Mibo"; tap it to talk. Keep the app open and the device on its
 charger. Stop mirroring and Mibo comes back to the device's screen.
 
+## Car Mode
+
+Talk to Mibo while driving, with the phone in your pocket. Run the
+"Talk to Mibo in the car" shortcut (Shortcuts app, or "Hey Siri, talk to
+My Mibo in the car"). Mibo switches to the car's hands-free Bluetooth
+(its microphone and speakers), starts listening, and turns on the
+proximity sensor so the screen goes dark in a pocket. Don't lock the
+phone; just put it away. It ends with the End Car Mode button, or by
+itself when the car's Bluetooth disconnects.
+
+To start it automatically: Shortcuts → Automation → + → Bluetooth → pick
+the car → Run Immediately → add "Talk to Mibo in the car".
+

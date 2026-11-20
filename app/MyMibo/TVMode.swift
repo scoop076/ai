@@ -93,6 +93,11 @@ final class TVMode: ObservableObject {
         view.addSubview(web)
     }
 
+    /// Run a bit of the page's code (used by Car Mode to start listening).
+    func runScript(_ js: String) {
+        web?.evaluateJavaScript(js, completionHandler: nil)
+    }
+
     /// Tapping the dark phone screen = tapping Mibo's face on the TV.
     func tapFace() {
         web?.evaluateJavaScript("var s = document.getElementById('stage'); if (s) s.click();", completionHandler: nil)
@@ -156,6 +161,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 /// with a clear sign of what Mibo is doing so Jim knows when to talk. Tap anywhere = tap Mibo's face.
 struct TVPhoneScreen: View {
     @ObservedObject private var tv = TVMode.shared
+    /// Shown under the title while Mibo is resting.
+    var restingNote = "Mibo is on your TV"
 
     private let orange = Color(red: 217/255, green: 119/255, blue: 21/255)
     private let teal = Color(red: 143/255, green: 211/255, blue: 200/255)
@@ -224,7 +231,7 @@ struct TVPhoneScreen: View {
         case "listening": return "Go ahead and talk. Tap to stop."
         case "thinking": return "One moment"
         case "speaking": return "Tap to interrupt"
-        default: return "Mibo is on your TV"
+        default: return restingNote
         }
     }
 
