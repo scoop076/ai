@@ -45,7 +45,9 @@ body {
 }
 .stage { position: relative; flex: 1; min-height: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 /* The glow fills the whole screen; the captions float over it. */
-#face { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; background-color: var(--glow); background-image: radial-gradient(circle at 50% 45%, var(--bg-pale, var(--glow-pale)), var(--bg-glow, var(--glow)) 40%, var(--bg-deep, var(--glow-deep))); }
+#face { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; background-color: var(--glow); background-image: radial-gradient(circle at 50% 45%, var(--glow-pale), var(--glow) 40%, var(--glow-deep)); }
+/* The same warm orange behind everything, so no other color can ever show through. */
+html, body { background-color: var(--glow); }
 .stage:focus-visible { outline: 2px solid var(--listen); outline-offset: -6px; }
 
 .gear {
@@ -1627,23 +1629,13 @@ body.no-captions .captions { visibility: hidden; }
     ctx.clearRect(0, 0, W, H);
     const cx = W / 2, cy = faceTop + faceH * 0.52, R = Math.max(40, Math.min(W, faceH) * 0.28);
 
-    const tg = look.target ? hexRGB(look.target.glow) : baseGlow;
-    for (let i = 0; i < 3; i++) glowNow[i] = ease(glowNow[i], tg[i], 1.6, dt);
+    // Every personality keeps the same warm orange glow; only its accessory changes.
     const wantAcc = look.target ? look.target.acc : "bow";
     if (look.acc !== wantAcc) { look.accAmt = ease(look.accAmt, 0, 7, dt); if (look.accAmt < 0.03) look.acc = wantAcc; }
     else look.accAmt = ease(look.accAmt, wantAcc ? 1 : 0, 3, dt);
     // The warm glow fills the whole screen, pale near the face and deeper toward the edges.
     const paleNow = glowNow.map((v) => v + (255 - v) * 0.45), deepNow = glowNow.map((v) => v * 0.78);
-    // The glow is the canvas element's own CSS background (never painted over on the canvas), so it always stays orange.
-    if (glowNow.every(Number.isFinite)) {
-      const bgKey = rgbaA(glowNow, 1);
-      if (cv.dataset.bg !== bgKey) {
-        cv.dataset.bg = bgKey;
-        cv.style.setProperty("--bg-pale", rgbaA(paleNow, 1));
-        cv.style.setProperty("--bg-glow", bgKey);
-        cv.style.setProperty("--bg-deep", rgbaA(deepNow, 1));
-      }
-    }
+    // The glow itself is fixed CSS on the canvas (see #face); the canvas only adds the face and a soft brightening while talking.
     const pulse = 0.06 * listenAmt + 0.1 * mouth;
     if (pulse > 0.005) {
       const lift = ctx.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 2.6);
