@@ -290,14 +290,13 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     private var started = Set<String>()         // sentences the page was told have started
 
     /// Kokoro pads each clip with silence at both ends, which added up to long pauses between
-    /// sentences. Trim it to a natural pause: a short breath between phrases of a sentence,
-    /// and about a third of a second after the end of a sentence.
+    /// sentences. Trim it to one short, natural pause (40 ms before + 200 ms after).
     static func trimSilence(_ samples: [Float], endOfSentence: Bool) -> [Float] {
         let quiet: Float = 0.01                 // about -40 dB
         guard let first = samples.firstIndex(where: { abs($0) > quiet }),
               let last = samples.lastIndex(where: { abs($0) > quiet }) else { return [] }
         let start = max(0, first - 24000 * 40 / 1000)                // keep 40 ms before
-        let after = endOfSentence ? 330 : 150                      // ms of quiet to keep after the speech
+        let after = 200                                             // ms of quiet to keep after the speech (140 ran together; 330 was too long)
         let end = min(samples.count, last + 1 + 24000 * after / 1000)
         return Array(samples[start..<end])
     }
