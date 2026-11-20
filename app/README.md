@@ -1,4 +1,4 @@
-# Claude Frame app (iPad and iPhone)
+# My Mibo app (iPad and iPhone)
 
 A full-screen app that shows https://ai.liljimjim.com and handles the
 microphone, speech recognition and speaker natively, so listening and
@@ -20,7 +20,7 @@ from the website, so changes Jim approves by voice show up in the app too.
 5. Pick the device in the bar at the top of Xcode and press **Run** (▶).
 6. The first time, on the device: Settings → General → VPN & Device
    Management → your Apple account → **Trust**.
-7. Open Claude Frame, sign in with the Cloudflare email code once, tap the
+7. Open My Mibo, sign in with the Cloudflare email code once, tap the
    face, and allow the microphone and speech recognition.
 
 With a free Apple account the app stops opening after 7 days; plug in and

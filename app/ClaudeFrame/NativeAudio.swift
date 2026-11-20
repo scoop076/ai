@@ -24,7 +24,7 @@ final class NativeAudio: NSObject {
     private var listenStarted = Date()
     private var quickFailures = 0
 
-    // Wake phrase: between conversations, listen quietly for "Hey Claude".
+    // Wake phrase: between conversations, listen quietly for "Hey Mibo".
     private enum Mode { case listen, wake }
     private var mode = Mode.listen
     private var wakeWanted = false
@@ -166,7 +166,7 @@ final class NativeAudio: NSObject {
         case "stopSay":
             synth.stopSpeaking(at: .immediate)
         case "wakeOn":
-            wakeOn(names: m["names"] as? [String] ?? ["claude"])
+            wakeOn(names: m["names"] as? [String] ?? ["mibo"])
         case "wakeOff":
             wakeOff()
         default:
@@ -290,7 +290,7 @@ final class NativeAudio: NSObject {
     // MARK: - Wake phrase
 
     private func wakeOn(names: [String]) {
-        var words = ["claude", "cloud", "clod", "claud", "clawed", "klaud", "claudia"]
+        var words = ["mibo", "meebo", "mebo", "miebo", "mibbo", "nibo", "neebo", "mybo"]   // "Mibo" and how speech recognition tends to spell it
         for n in names {
             let w = n.lowercased().filter { $0.isLetter }
             if !w.isEmpty && !words.contains(w) { words.append(w) }

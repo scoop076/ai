@@ -5,6 +5,7 @@ import SwiftUI
 import WebKit
 
 let frameURL = URL(string: "https://ai.liljimjim.com")!
+let miboOrange = UIColor(red: 217/255, green: 119/255, blue: 21/255, alpha: 1)   // #D97715
 
 struct FrameWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -19,11 +20,11 @@ struct FrameWebView: UIViewRepresentable {
 
         let web = WKWebView(frame: .zero, configuration: config)
         web.isOpaque = false
-        web.backgroundColor = .black
-        web.scrollView.backgroundColor = .black
+        web.backgroundColor = miboOrange           // matches the page's glow, so loading and pull-to-reload stay orange
+        web.scrollView.backgroundColor = miboOrange
         web.scrollView.alwaysBounceVertical = true   // pull down on the frame to reload it
         let refresh = UIRefreshControl()
-        refresh.tintColor = .lightGray
+        refresh.tintColor = .white
         refresh.addTarget(context.coordinator, action: #selector(Coordinator.pulledToReload(_:)), for: .valueChanged)
         web.scrollView.refreshControl = refresh
         context.coordinator.web = web
@@ -84,9 +85,9 @@ struct FrameWebView: UIViewRepresentable {
         private func showOffline(_ webView: WKWebView) {
             let html = """
             <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-            <style>body{background:#000;color:#ddd;font:20px -apple-system,sans-serif;display:flex;
+            <style>body{background:radial-gradient(circle at 50% 45%,#eaa766,#d97715 40%,#a95d10);color:#2b1f27;font:20px -apple-system,sans-serif;display:flex;
             height:100vh;margin:0;align-items:center;justify-content:center;text-align:center}
-            button{font:inherit;padding:14px 26px;border-radius:14px;border:0;background:#333;color:#fff;margin-top:18px}</style></head>
+            button{font:inherit;padding:14px 26px;border-radius:14px;border:0;background:#2b1f27;color:#fff;margin-top:18px}</style></head>
             <body><div>I can't reach the frame right now.<br>Check the Wi-Fi.<br>
             <button onclick="location.href='\(frameURL.absoluteString)'">Try again</button></div>
             <script>setTimeout(function(){location.href='\(frameURL.absoluteString)'},15000)</script></body></html>
