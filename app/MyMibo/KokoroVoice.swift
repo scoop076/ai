@@ -66,25 +66,52 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     //
     // A problem inside the voice engine can stop the whole app, which no error handling can catch.
     // So a small marker file is written just before loading or speaking, and removed right after.
-    // If the app finds the marker when it starts, the engine took the app down last time: from then
-    // on (for this model) Mibo sticks with Apple's voices instead of crashing again.
+    // Finding the marker at launch counts as a strike. But stopping the app (including pressing
+    // Run in Xcode) also leaves the marker, so one strike isn't enough: the built-in voice only
+    // turns off after two strikes in a row with no successful sentence in between. Every new
+    // build of the app starts fresh.
 
     private var folder: URL { modelFile.deletingLastPathComponent() }
     private var busyMarker: URL { folder.appendingPathComponent("busy-" + KokoroVoice.modelName) }
-    private var offMarker: URL { folder.appendingPathComponent("off-" + KokoroVoice.modelName) }
+    private var strikesFile: URL { folder.appendingPathComponent("strikes-" + KokoroVoice.modelName) }
 
     private func markBusy() { FileManager.default.createFile(atPath: busyMarker.path, contents: Data()) }
     private func markDone() { try? FileManager.default.removeItem(at: busyMarker) }
 
-    /// True if the built-in voice should stay off because it crashed the app before.
+    /// Changes with every build of the app (the app binary's date).
+    private var buildStamp: String {
+        guard let exe = Bundle.main.executableURL,
+              let date = try? FileManager.default.attributesOfItem(atPath: exe.path)[.modificationDate] as? Date else { return "?" }
+        return String(Int(date.timeIntervalSince1970))
+    }
+
+    private func readStrikes() -> Int {
+        guard let text = try? String(contentsOf: strikesFile, encoding: .utf8) else { return 0 }
+        let parts = text.split(separator: "|")
+        guard parts.count == 2, String(parts[0]) == buildStamp else { return 0 }   // a new build starts fresh
+        return Int(parts[1]) ?? 0
+    }
+
+    private func writeStrikes(_ n: Int) {
+        try? (buildStamp + "|" + String(n)).write(to: strikesFile, atomically: true, encoding: .utf8)
+    }
+
+    /// True if the built-in voice should stay off because it seems to keep crashing the app.
     private func crashedBefore() -> Bool {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: busyMarker.path) {
-            print("My Mibo: the built-in voice stopped the app last time; using Apple's voices from now on.")
-            fm.createFile(atPath: offMarker.path, contents: Data())
+        var strikes = readStrikes()
+        if FileManager.default.fileExists(atPath: busyMarker.path) {
+            strikes += 1
             markDone()
+            print("My Mibo: the app stopped while the built-in voice was busy (strike \(strikes) of 2).")
         }
-        return fm.fileExists(atPath: offMarker.path)
+        writeStrikes(strikes)
+        if strikes >= 2 { print("My Mibo: the built-in voice stays off for this build; using Apple's voices.") }
+        return strikes >= 2
+    }
+
+    /// A sentence was spoken fine: clear the strikes.
+    private func spokeFine() {
+        if readStrikes() != 0 { writeStrikes(0) }
     }
 
     // MARK: - Getting the model ready
@@ -97,6 +124,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         for old in KokoroVoice.oldModelNames {   // free the space the old model used
             try? FileManager.default.removeItem(at: folder.appendingPathComponent(old))
         }
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent("off-" + KokoroVoice.modelName))   // the old one-strike switch
         if crashedBefore() { setStatus("failed"); return }
         if FileManager.default.fileExists(atPath: modelFile.path) { load() } else { download() }
         #endif
@@ -214,6 +242,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
                 }
                 // How fast the voice is working: making speech slower than it plays causes gaps.
                 let took = Date().timeIntervalSince(began)
+                if gotAudio { self.spokeFine() }
                 print(String(format: "My Mibo voice: %.1f s of speech made in %.1f s (first sound after %.1f s) — %@",
                              seconds, took, firstSound, took > seconds ? "TOO SLOW, gaps likely" : "keeping up"))
             } catch {
