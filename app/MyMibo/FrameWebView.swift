@@ -10,7 +10,7 @@ let miboOrange = UIColor(red: 217/255, green: 119/255, blue: 21/255, alpha: 1)  
 struct FrameWebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> UIView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()            // keeps the Cloudflare sign-in between launches
         config.allowsInlineMediaPlayback = true
@@ -41,10 +41,18 @@ struct FrameWebView: UIViewRepresentable {
             web.evaluateJavaScript("window.__frameNative && window.__frameNative(\(json))", completionHandler: nil)
         }
         web.load(URLRequest(url: frameURL))
-        return web
+
+        // The web view sits in a holder view, so TV mode can move it onto the TV and back.
+        let home = UIView()
+        home.backgroundColor = miboOrange
+        web.frame = home.bounds
+        web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        home.addSubview(web)
+        TVMode.shared.attach(web: web, home: home)
+        return home
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {}
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
         weak var web: WKWebView?

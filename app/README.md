@@ -49,3 +49,11 @@ iPad and works offline.
 - If the MediaPipe package is missing, the app still builds and simply keeps
   using Apple's voices.
 
+## TV mode
+
+Screen-mirror the iPhone or iPad to an Apple TV (Control Center → Screen
+Mirroring) and Mibo moves to the TV full screen, with its voice on the TV.
+The device's own screen goes black with a small dim dot and keeps listening
+for "Hey Mibo"; tap it to talk. Keep the app open and the device on its
+charger. Stop mirroring and Mibo comes back to the device's screen.
+

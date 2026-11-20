@@ -9,13 +9,18 @@ import UIKit
 
 @main
 struct MyMiboApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate   // hands an Apple TV to TV mode
     @Environment(\.scenePhase) private var phase
+    @StateObject private var tv = TVMode.shared
 
     var body: some Scene {
         WindowGroup {
-            FrameWebView()
-                .ignoresSafeArea()
-                .background(Color(red: 217/255, green: 119/255, blue: 21/255))   // Mibo's orange, so nothing dark shows while the page loads
+            ZStack {
+                FrameWebView()
+                    .ignoresSafeArea()
+                    .background(Color(red: 217/255, green: 119/255, blue: 21/255))   // Mibo's orange, so nothing dark shows while the page loads
+                if tv.active { TVPhoneScreen() }   // Mibo is on the TV: this screen goes dark and acts as the mic
+            }
                 .statusBarHidden(true)
                 .persistentSystemOverlays(.hidden)
                 .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
