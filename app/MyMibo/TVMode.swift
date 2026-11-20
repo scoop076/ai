@@ -33,9 +33,7 @@ final class TVMode: ObservableObject {
     }
     private var idleTimer: DispatchWorkItem?
     // Buzzes (iPhone only; iPads have no vibration motor), whether or not Mibo is on the TV:
-    // a clear double-tap when it's your turn to talk, a light tap when Mibo heard you.
-    private let yourTurn = UINotificationFeedbackGenerator()
-    private let gotIt = UIImpactFeedbackGenerator(style: .light)
+    // a clear double-tap when it's your turn to talk, a light tap when Mibo heard you. See Buzzer.swift.
 
     /// Called with each change the page reports. Buzzes mark "your turn" and "got it".
     func show(state: String, waitingForWake wake: Bool) {
@@ -51,9 +49,9 @@ final class TVMode: ObservableObject {
     }
 
     private func apply(_ state: String, wake: Bool) {
-        if state == "listening" && miboState != "listening" { yourTurn.notificationOccurred(.success) }
-        if state == "thinking" && miboState == "listening" { gotIt.impactOccurred() }
-        if state == "speaking" || state == "thinking" { yourTurn.prepare() }   // ready for the next turn
+        if state != miboState { print("My Mibo: \(miboState) → \(state)") }
+        if state == "listening" && miboState != "listening" { Buzzer.shared.yourTurn() }
+        if state == "thinking" && miboState == "listening" { Buzzer.shared.gotIt() }
         miboState = state
         waitingForWake = wake
     }
