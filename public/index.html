@@ -225,7 +225,7 @@ body.no-captions .captions { visibility: hidden; }
     </label>
     </div>
     <label for="rateIn">Speaking speed
-      <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.2">
+      <input id="rateIn" type="range" min="0.7" max="1.6" step="0.05" value="1.2">
     </label>
     <button class="quiet" id="testVoiceBtn" type="button">Hear this voice</button>
     <h3>This screen</h3>
@@ -919,6 +919,11 @@ body.no-captions .captions { visibility: hidden; }
     if (useCloud()) { speakEleven(text); return; }
     speakSystem(text);
   }
+  // The speaking speed from the slider (1.2 by default), kept within the slider's range.
+  function speechRate() {
+    const r = Number(settings.rate);
+    return Number.isFinite(r) ? Math.min(1.6, Math.max(0.7, r)) : 1.2;
+  }
   function speakSystem(text) {
     if (APP) {
       queued++;
@@ -927,7 +932,7 @@ body.no-captions .captions { visibility: hidden; }
         start: () => { sysSpeaking = 1; markAudioStart(); },
         end: () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); },
       };
-      toApp({ type: "say", id, text, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), rate: Number(settings.rate) });
+      toApp({ type: "say", id, text, voice: v ? v.name : "", kokoro: kokoroVoiceNow(), rate: speechRate() });
       return;
     }
     if (!("speechSynthesis" in window)) return;
@@ -935,7 +940,7 @@ body.no-captions .captions { visibility: hidden; }
     const u = new SpeechSynthesisUtterance(text);
     const v = currentVoice();
     if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-US";
-    u.rate = Number(settings.rate);
+    u.rate = speechRate();
     u.onstart = () => { sysSpeaking = 1; markAudioStart(); };
     u.onboundary = () => { kick = 1; };
     u.onend = u.onerror = () => { sysSpeaking = 0; queued = Math.max(0, queued - 1); maybeFinish(); };
