@@ -41,11 +41,19 @@ iPad and works offline.
 
 - The first time Xcode opens the project it fetches the MediaPipe package
   (File → Packages → Resolve Package Versions if it doesn't start on its own).
-- The first time the app opens, it downloads the voice model (about 295 MB)
+- The first time the app opens, it downloads the voice model (the fast GPU version; a device where that crashes switches to the CPU version)
   in the background. Use Wi-Fi. Until it's done, Mibo uses Apple's voices.
   Settings shows the download progress.
 - Each character's Kokoro voice is set in `src/personas.js` (`kokoro:`);
   regular Mibo uses `af_heart`.
 - If the MediaPipe package is missing, the app still builds and simply keeps
   using Apple's voices.
+
+## TV mode
+
+Screen-mirror the iPhone or iPad to an Apple TV (Control Center → Screen
+Mirroring) and Mibo moves to the TV full screen, with its voice on the TV.
+The device's own screen goes black with a small dim dot and keeps listening
+for "Hey Mibo"; tap it to talk. Keep the app open and the device on its
+charger. Stop mirroring and Mibo comes back to the device's screen.
 

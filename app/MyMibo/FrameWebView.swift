@@ -7,10 +7,10 @@ import WebKit
 let frameURL = URL(string: "https://ai.liljimjim.com")!
 let miboOrange = UIColor(red: 217/255, green: 119/255, blue: 21/255, alpha: 1)   // #D97715
 
-struct FrameWebView: UIViewRepresentable {
+struct FrameWebView: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIViewController(context: Context) -> FrameViewController {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()            // keeps the Cloudflare sign-in between launches
         config.allowsInlineMediaPlayback = true
@@ -22,11 +22,11 @@ struct FrameWebView: UIViewRepresentable {
         web.isOpaque = false
         web.backgroundColor = miboOrange           // matches the page's glow, so loading and pull-to-reload stay orange
         web.scrollView.backgroundColor = miboOrange
-        web.scrollView.alwaysBounceVertical = true   // pull down on the frame to reload it
-        let refresh = UIRefreshControl()
-        refresh.tintColor = .white
-        refresh.addTarget(context.coordinator, action: #selector(Coordinator.pulledToReload(_:)), for: .valueChanged)
-        web.scrollView.refreshControl = refresh
+        // No pull-to-reload: the page never scrolls, so it could never work, and the control's
+        // leftover phone-sized frame caused screen-conversion warnings in TV mode.
+        // Mibo reloads itself when a new version is out (and settings has a Reload button).
+        web.scrollView.isScrollEnabled = false
+        web.scrollView.bounces = false
         context.coordinator.web = web
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.allowsBackForwardNavigationGestures = false
@@ -41,10 +41,18 @@ struct FrameWebView: UIViewRepresentable {
             web.evaluateJavaScript("window.__frameNative && window.__frameNative(\(json))", completionHandler: nil)
         }
         web.load(URLRequest(url: frameURL))
-        return web
+
+        // The web view sits in a holder view, so TV mode can move it onto the TV and back.
+        let home = UIView()
+        home.backgroundColor = miboOrange
+        web.frame = home.bounds
+        web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        home.addSubview(web)
+        TVMode.shared.attach(web: web, home: home)
+        return FrameViewController(home: home)
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIViewController(_ controller: FrameViewController, context: Context) {}
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
         weak var web: WKWebView?

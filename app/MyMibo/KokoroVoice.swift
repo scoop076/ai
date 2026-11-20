@@ -17,8 +17,25 @@ import MediaPipeTasksAudio
 final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     static let shared = KokoroVoice()
 
-    private static let modelName = "kokoro_int8_gpu_fp16.litertlm"
-    private static let modelURL = URL(string: "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm")!
+    // Two versions of the model: the graphics-chip (GPU) one is fast, but it crashed inside
+    // MediaPipe on one iPhone (a Metal shader assert). So every device tries the GPU version
+    // first; a device where it crashes moves to the CPU version for good (delete the app to retry).
+    private static let modelBase = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/"
+    private static let gpuModel = "kokoro_int8_gpu_fp16.litertlm"
+    private static let cpuModel = "kokoro_int8_fp16.litertlm"
+    private var useGPU: Bool { !xcodeMetalChecker && !gpuTurnedOff }
+
+    /// Xcode's "Metal API Validation" checker (on when running from Xcode unless switched off in the
+    /// scheme) stops the app on a harmless quirk in MediaPipe's GPU code. When it's on, use the CPU
+    /// voice for that run; launched normally (or with the checker off), the fast GPU voice is used.
+    private var xcodeMetalChecker: Bool { ProcessInfo.processInfo.environment["MTL_DEBUG_LAYER"] == "1" }
+
+    /// The GPU voice stopped the app during this build: stay on the CPU voice until the next build.
+    private var gpuTurnedOff: Bool {
+        (try? String(contentsOf: gpuOffMarker, encoding: .utf8)) == buildStamp
+    }
+    private var modelName: String { useGPU ? KokoroVoice.gpuModel : KokoroVoice.cpuModel }
+    private var modelURL: URL { URL(string: KokoroVoice.modelBase + modelName)! }
 
     /// "off" (not available here), "downloading", "loading", "ready" or "failed".
     private(set) var status = "off"
@@ -54,9 +71,72 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         engine.connect(node, to: engine.mainMixerNode, format: format)
     }
 
-    private var modelFile: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Kokoro", isDirectory: true).appendingPathComponent(KokoroVoice.modelName)
+    private var folder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Kokoro", isDirectory: true)
+    }
+    private var modelFile: URL { folder.appendingPathComponent(modelName) }
+    /// Where the engine keeps its unpacked voice data between sentences (without it, every sentence starts slowly).
+    private var cacheFolder: URL { folder.appendingPathComponent("cache", isDirectory: true) }
+    private var gpuOffMarker: URL { folder.appendingPathComponent("gpu-off") }
+
+    // MARK: - Crash guard
+    //
+    // A problem inside the voice engine can stop the whole app, which no error handling can catch.
+    // So a small marker file is written just before loading or speaking, and removed right after.
+    // Finding the marker at launch counts as a strike. But stopping the app (including pressing
+    // Run in Xcode) also leaves the marker, so one strike isn't enough: the built-in voice only
+    // turns off after two strikes in a row with no successful sentence in between. Every new
+    // build of the app starts fresh.
+
+    private var busyMarker: URL { folder.appendingPathComponent("busy") }
+    private var strikesFile: URL { folder.appendingPathComponent("strikes-" + modelName) }
+
+    private func markBusy() { FileManager.default.createFile(atPath: busyMarker.path, contents: Data((useGPU ? "gpu" : "cpu").utf8)) }
+    private func markDone() { try? FileManager.default.removeItem(at: busyMarker) }
+
+    /// Changes with every build of the app (the app binary's date).
+    private var buildStamp: String {
+        guard let exe = Bundle.main.executableURL,
+              let date = try? FileManager.default.attributesOfItem(atPath: exe.path)[.modificationDate] as? Date else { return "?" }
+        return String(Int(date.timeIntervalSince1970))
+    }
+
+    private func readStrikes() -> Int {
+        guard let text = try? String(contentsOf: strikesFile, encoding: .utf8) else { return 0 }
+        let parts = text.split(separator: "|")
+        guard parts.count == 2, String(parts[0]) == buildStamp else { return 0 }   // a new build starts fresh
+        return Int(parts[1]) ?? 0
+    }
+
+    private func writeStrikes(_ n: Int) {
+        try? (buildStamp + "|" + String(n)).write(to: strikesFile, atomically: true, encoding: .utf8)
+    }
+
+    /// True if the built-in voice should stay off because it seems to keep crashing the app.
+    private func crashedBefore() -> Bool {
+        let fm = FileManager.default
+        // The GPU version stopped the app: use the CPU version for the rest of this build
+        // (a new build tries the GPU voice again). The GPU model is kept for that retry.
+        if let what = try? String(contentsOf: busyMarker, encoding: .utf8), what == "gpu" {
+            print("My Mibo: the GPU voice stopped the app; using the CPU voice until the next build.")
+            markDone()
+            try? buildStamp.write(to: gpuOffMarker, atomically: true, encoding: .utf8)
+            return false
+        }
+        var strikes = readStrikes()
+        if fm.fileExists(atPath: busyMarker.path) {
+            strikes += 1
+            markDone()
+            print("My Mibo: the app stopped while the built-in voice was busy (strike \(strikes) of 2).")
+        }
+        writeStrikes(strikes)
+        if strikes >= 2 { print("My Mibo: the built-in voice stays off for this build; using Apple's voices.") }
+        return strikes >= 2
+    }
+
+    /// A sentence was spoken fine: clear the strikes.
+    private func spokeFine() {
+        if readStrikes() != 0 { writeStrikes(0) }
     }
 
     // MARK: - Getting the model ready
@@ -65,6 +145,12 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     func start() {
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
         guard status == "off" || status == "failed" else { return }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: cacheFolder, withIntermediateDirectories: true)
+        for name in ["off-" + KokoroVoice.cpuModel, "busy-" + KokoroVoice.cpuModel] {   // markers from earlier builds
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
+        if crashedBefore() { setStatus("failed"); return }
         if FileManager.default.fileExists(atPath: modelFile.path) { load() } else { download() }
         #endif
     }
@@ -83,7 +169,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         config.timeoutIntervalForResource = 60 * 60
         let s = URLSession(configuration: config, delegate: self, delegateQueue: .main)
         session = s
-        s.downloadTask(with: KokoroVoice.modelURL).resume()
+        s.downloadTask(with: modelURL).resume()
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
@@ -126,19 +212,25 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
         setStatus("loading")
         let path = modelFile.path
+        let gpu = useGPU
+        let cache = cacheFolder.path
         DispatchQueue.global(qos: .userInitiated).async {
             do {
+                self.markBusy()
                 let options = TextToSpeechOptions(
-                    baseOptions: TTSBaseOptions(modelAssetPath: path, delegate: .gpu),
+                    baseOptions: TTSBaseOptions(modelAssetPath: path, delegate: gpu ? .gpu : .cpu),
                     defaultVoiceId: "af_heart",
-                    speakingRate: 1.0
+                    cacheDirectory: cache
                 )
+                print("My Mibo: loading the \(gpu ? "GPU" : "CPU") voice" + (self.xcodeMetalChecker ? " (Xcode's Metal API Validation is on, so not the GPU voice)" : ""))
                 let engine = try createTextToSpeech(options: options)
+                self.markDone()
                 DispatchQueue.main.async {
                     self.tts = engine
                     self.setStatus("ready")
                 }
             } catch {
+                self.markDone()
                 print("My Mibo: couldn't load the voice model: \(error)")
                 // A damaged file would fail every time, so remove it; it downloads again next launch.
                 try? FileManager.default.removeItem(atPath: path)
@@ -150,8 +242,9 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
 
     // MARK: - Speaking
 
-    /// Speak one sentence. Sentences play in the order they arrive; the page hears
-    /// "sayStart" when each one begins and "spoke" when it ends (or is skipped).
+    /// Speak one sentence. Sentences play in the order they arrive. Each sentence is streamed:
+    /// its first phrase starts playing while the rest is still being made, so Mibo starts
+    /// talking sooner. The page hears "sayStart" when a sentence begins and "spoke" when it ends.
     func speak(id: String, text: String, voice: String, token: Int) {
         guard token == generation else { return }   // stopped while the audio was waking up
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
@@ -160,52 +253,103 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         let gen = generation
         let previous = chain
         chain = Task { @MainActor [weak self] in
-            await previous?.value                     // synthesize in order
+            await previous?.value                     // make sentences in order
             guard let self, self.generation == gen else { return }
+            var gotAudio = false
+            var seconds = 0.0, firstSound = 0.0
+            let began = Date()
+            self.markBusy()
+            defer { self.markDone() }
             do {
-                let result = try await tts.synthesizeAsync(text, options: SynthesisOptions(voiceId: voice))
-                guard self.generation == gen else { return }
-                self.schedule(result.samples, rate: result.sampleRateHz, id: id, gen: gen)
+                for try await chunk in tts.synthesizeStream(text, options: SynthesisOptions(voiceId: voice)) {
+                    guard self.generation == gen else { return }
+                    let samples = KokoroVoice.trimSilence(chunk.samples, endOfSentence: chunk.isFinal)
+                    if firstSound == 0 { firstSound = Date().timeIntervalSince(began) }
+                    seconds += Double(samples.count) / 24000
+                    if self.enqueue(samples, rate: chunk.sampleRateHz, id: id, gen: gen) { gotAudio = true }
+                }
+                // How fast the voice is working: making speech slower than it plays causes gaps.
+                let took = Date().timeIntervalSince(began)
+                if gotAudio { self.spokeFine() }
+                print(String(format: "My Mibo voice: %.1f s of speech made in %.1f s (first sound after %.1f s) — %@",
+                             seconds, took, firstSound, took > seconds ? "TOO SLOW, gaps likely" : "keeping up"))
             } catch {
                 guard self.generation == gen else { return }
                 print("My Mibo: couldn't speak a sentence: \(error)")
-                self.finished(id)                     // skip it rather than stall
             }
+            guard self.generation == gen else { return }
+            self.streamEnded(id, gotAudio: gotAudio)
         }
         #else
         onEvent?(["type": "spoke", "id": id])
         #endif
     }
 
-    private func schedule(_ samples: [Float], rate: Int, id: String, gen: Int) {
+    private var pending: [String: Int] = [:]   // buffers of each sentence still to play
+    private var ended = Set<String>()           // sentences whose audio is all made
+    private var started = Set<String>()         // sentences the page was told have started
+
+    /// Kokoro pads each clip with silence at both ends, which added up to long pauses between
+    /// sentences. Trim it to one short, natural pause (40 ms before + 200 ms after).
+    static func trimSilence(_ samples: [Float], endOfSentence: Bool) -> [Float] {
+        let quiet: Float = 0.01                 // about -40 dB
+        guard let first = samples.firstIndex(where: { abs($0) > quiet }),
+              let last = samples.lastIndex(where: { abs($0) > quiet }) else { return [] }
+        let start = max(0, first - 24000 * 40 / 1000)                // keep 40 ms before
+        let after = 200                                             // ms of quiet to keep after the speech (140 ran together; 330 was too long)
+        let end = min(samples.count, last + 1 + 24000 * after / 1000)
+        return Array(samples[start..<end])
+    }
+
+    /// Queue one phrase of audio. Returns false if it couldn't be played.
+    private func enqueue(_ samples: [Float], rate: Int, id: String, gen: Int) -> Bool {
         guard !samples.isEmpty, rate == 0 || rate == 24000,
               let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
-              let ch = buf.floatChannelData?[0] else { finished(id); return }
+              let ch = buf.floatChannelData?[0] else { return false }
         buf.frameLength = AVAudioFrameCount(samples.count)
         for i in 0..<samples.count {
             let s = samples[i]
             ch[i] = s.isFinite ? max(-1, min(1, s)) : 0
         }
         if !engine.isRunning {
-            do { try engine.start() } catch { print("My Mibo: voice playback failed: \(error)"); finished(id); return }
+            do { try engine.start() } catch { print("My Mibo: voice playback failed: \(error)"); return false }
         }
         if !node.isPlaying { node.play() }
+        pending[id, default: 0] += 1
         scheduled.insert(id)
-        if queue.first == id { onEvent?(["type": "sayStart", "id": id]) }
+        announceStartIfFirst()
         node.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.generation == gen else { return }
-                self.finished(id)
+                self.pending[id, default: 1] -= 1
+                self.finishIfDone(id)
             }
         }
+        return true
+    }
+
+    private func streamEnded(_ id: String, gotAudio: Bool) {
+        ended.insert(id)
+        if gotAudio { finishIfDone(id) } else { finished(id) }   // nothing to play: skip it rather than stall
+    }
+
+    private func finishIfDone(_ id: String) {
+        if ended.contains(id), (pending[id] ?? 0) <= 0 { finished(id) }
+    }
+
+    /// Tell the page the sentence at the front has started, once its audio is playing.
+    private func announceStartIfFirst() {
+        guard let first = queue.first, scheduled.contains(first), !started.contains(first) else { return }
+        started.insert(first)
+        onEvent?(["type": "sayStart", "id": first])
     }
 
     private func finished(_ id: String) {
         guard let i = queue.firstIndex(of: id) else { return }
         queue.remove(at: i)
-        scheduled.remove(id)
+        scheduled.remove(id); pending[id] = nil; ended.remove(id); started.remove(id)
         onEvent?(["type": "spoke", "id": id])
-        if let next = queue.first, scheduled.contains(next) { onEvent?(["type": "sayStart", "id": next]) }
+        announceStartIfFirst()
     }
 
     /// Stop talking right away and drop anything still waiting.
@@ -219,7 +363,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         node.stop()
         let dropped = queue
         queue.removeAll()
-        scheduled.removeAll()
+        scheduled.removeAll(); pending.removeAll(); ended.removeAll(); started.removeAll()
         for id in dropped { onEvent?(["type": "spoke", "id": id]) }
     }
 }

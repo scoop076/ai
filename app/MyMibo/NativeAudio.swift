@@ -50,10 +50,10 @@ final class NativeAudio: NSObject {
         configureSession()
         synth.usesApplicationAudioSession = true
         synth.delegate = synthEvents
-        synthEvents.onEvent = { [weak self] event in self?.send(event) }
+        synthEvents.onEvent = { [weak self] event in self?.sendSpeechEvent(event) }
         loadVoices()
         let kokoro = KokoroVoice.shared
-        kokoro.onEvent = { [weak self] event in self?.send(event) }
+        kokoro.onEvent = { [weak self] event in self?.sendSpeechEvent(event) }
         kokoro.onStatus = { [weak self] in self?.sendKokoroStatus() }
         kokoro.start()
         let nc = NotificationCenter.default
@@ -113,6 +113,21 @@ final class NativeAudio: NSObject {
         stopPlayback()
         synth.stopSpeaking(at: .immediate)
         KokoroVoice.shared.stop()
+    }
+
+    /// On an AirPlay speaker (the Apple TV in TV mode) the sound arrives a second or two after it
+    /// leaves this device. When Mibo's last sentence ends, wait that long before telling the page,
+    /// so the microphone doesn't come back on and hear Mibo's own last words from the TV.
+    private func sendSpeechEvent(_ event: [String: Any]) {
+        let session = AVAudioSession.sharedInstance()
+        let onAirPlay = session.currentRoute.outputs.contains { $0.portType == .airPlay }
+        let lastSentence = !synth.isSpeaking && !KokoroVoice.shared.isSpeaking
+        if onAirPlay, lastSentence, (event["type"] as? String) == "spoke" {
+            let wait = max(1.5, session.outputLatency + 0.3)
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.send(event) }
+        } else {
+            send(event)
+        }
     }
 
     /// Tell the page how Mibo's built-in voice is doing (for the settings screen).
@@ -184,6 +199,10 @@ final class NativeAudio: NSObject {
             wakeOn(names: m["names"] as? [String] ?? ["mibo"])
         case "wakeOff":
             wakeOff()
+        case "captions":
+            TVMode.shared.showCaptions(you: m["you"] as? String ?? "", mibo: m["mibo"] as? String ?? "")
+        case "state":
+            TVMode.shared.show(state: m["state"] as? String ?? "idle", waitingForWake: (m["wake"] as? Bool) ?? false)
         default:
             break
         }
@@ -232,6 +251,8 @@ final class NativeAudio: NSObject {
         req.shouldReportPartialResults = true
         req.addsPunctuation = true
         req.taskHint = .dictation
+        // Tell speech recognition these words are likely, so "Mibo" isn't heard as "Mabel" or "maybe".
+        req.contextualStrings = ["Mibo", "Hey Mibo", "Collinsville"]
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }   // faster, no daily limit
 
         let input = engine.inputNode
@@ -305,7 +326,7 @@ final class NativeAudio: NSObject {
     // MARK: - Wake phrase
 
     private func wakeOn(names: [String]) {
-        var words = ["mibo", "meebo", "mebo", "miebo", "mibbo", "nibo", "neebo", "mybo"]   // "Mibo" and how speech recognition tends to spell it
+        var words = ["mibo", "meebo", "mebo", "miebo", "mibbo", "nibo", "neebo", "mybo", "mabel", "mable", "maybel", "mibel"]   // "Mibo" and how speech recognition tends to spell it
         for n in names {
             let w = n.lowercased().filter { $0.isLetter }
             if !w.isEmpty && !words.contains(w) { words.append(w) }
