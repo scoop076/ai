@@ -8,7 +8,7 @@ import SwiftUI
 import UIKit
 
 @main
-struct ClaudeFrameApp: App {
+struct MyMiboApp: App {
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {

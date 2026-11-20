@@ -74,7 +74,7 @@ const EDIT_TOOL = {
 };
 
 const ENGINEER = [
-  "You are the engineer for Claude Frame, a talking portrait web app that hangs on Jim's wall and runs in his browsers.",
+  "You are the engineer for Mibo (the My Mibo frame), a talking portrait web app that hangs on Jim's wall and runs in his browsers.",
   "It is a Cloudflare Worker. public/index.html is the entire front end (HTML, CSS and JavaScript in one file).",
   "src/worker.js relays requests to Claude and ElevenLabs behind Cloudflare Access and stores memory; src/memory.js is the Durable Object that keeps memory, shared settings and the change queue;",
   "src/changes.js is the code that makes these changes; src/personas.js defines the personalities (characters) the frame can switch into, with their voices and looks.",
@@ -163,7 +163,7 @@ export async function runChange(env, job, update) {
       title: "Frame change #" + job.id + ": " + summary,
       head: branch,
       base: "main",
-      body: "Requested by Jim through Claude Frame:\n\n> " + job.description + "\n\n" + (result.spoken || "") +
+      body: "Requested by Jim through Mibo:\n\n> " + job.description + "\n\n" + (result.spoken || "") +
         "\n\nFiles changed: " + changed.map(([p]) => p).join(", ") + "\n\nSay \"approve\" to the frame to publish this, or \"discard\" to drop it.",
     }),
   });

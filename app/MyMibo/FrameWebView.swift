@@ -15,7 +15,7 @@ struct FrameWebView: UIViewRepresentable {
         config.websiteDataStore = .default()            // keeps the Cloudflare sign-in between launches
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.applicationNameForUserAgent = "ClaudeFrameApp/1.0"
+        config.applicationNameForUserAgent = "MyMiboApp/1.0"   // the page also still recognizes the old ClaudeFrameApp name
         config.userContentController.add(context.coordinator, name: "frame")
 
         let web = WKWebView(frame: .zero, configuration: config)
