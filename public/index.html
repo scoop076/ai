@@ -225,7 +225,7 @@ body.no-captions .captions { visibility: hidden; }
     </label>
     </div>
     <label for="rateIn">Speaking speed
-      <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.05">
+      <input id="rateIn" type="range" min="0.8" max="1.35" step="0.05" value="1.2">
     </label>
     <button class="quiet" id="testVoiceBtn" type="button">Hear this voice</button>
     <h3>This screen</h3>
@@ -304,7 +304,7 @@ body.no-captions .captions { visibility: hidden; }
   };
   let settings = {
     voice: store.get("voice", ""),
-    rate: store.get("rate", 1.05),
+    rate: store.get("rate", 1.2),
     stay: Number(store.get("stay", 5)),
     captions: store.get("captions", true),
     model: store.get("model", "claude-haiku-5-5"),
