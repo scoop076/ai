@@ -17,11 +17,15 @@ import MediaPipeTasksAudio
 final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     static let shared = KokoroVoice()
 
-    // The CPU version of the model. The GPU version crashed inside MediaPipe on an iPhone
-    // (a Metal shader assert), so Mibo runs the voice on the main processor instead.
-    private static let modelName = "kokoro_int8_fp16.litertlm"
-    private static let modelURL = URL(string: "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_fp16.litertlm")!
-    private static let oldModelNames = ["kokoro_int8_gpu_fp16.litertlm"]
+    // Two versions of the model: the graphics-chip (GPU) one is fast, but it crashed inside
+    // MediaPipe on one iPhone (a Metal shader assert). So every device tries the GPU version
+    // first; a device where it crashes moves to the CPU version for good (delete the app to retry).
+    private static let modelBase = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/"
+    private static let gpuModel = "kokoro_int8_gpu_fp16.litertlm"
+    private static let cpuModel = "kokoro_int8_fp16.litertlm"
+    private var useGPU: Bool { !FileManager.default.fileExists(atPath: gpuOffMarker.path) }
+    private var modelName: String { useGPU ? KokoroVoice.gpuModel : KokoroVoice.cpuModel }
+    private var modelURL: URL { URL(string: KokoroVoice.modelBase + modelName)! }
 
     /// "off" (not available here), "downloading", "loading", "ready" or "failed".
     private(set) var status = "off"
@@ -57,10 +61,13 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         engine.connect(node, to: engine.mainMixerNode, format: format)
     }
 
-    private var modelFile: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Kokoro", isDirectory: true).appendingPathComponent(KokoroVoice.modelName)
+    private var folder: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Kokoro", isDirectory: true)
     }
+    private var modelFile: URL { folder.appendingPathComponent(modelName) }
+    /// Where the engine keeps its unpacked voice data between sentences (without it, every sentence starts slowly).
+    private var cacheFolder: URL { folder.appendingPathComponent("cache", isDirectory: true) }
+    private var gpuOffMarker: URL { folder.appendingPathComponent("gpu-off") }
 
     // MARK: - Crash guard
     //
@@ -71,11 +78,10 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
     // turns off after two strikes in a row with no successful sentence in between. Every new
     // build of the app starts fresh.
 
-    private var folder: URL { modelFile.deletingLastPathComponent() }
-    private var busyMarker: URL { folder.appendingPathComponent("busy-" + KokoroVoice.modelName) }
-    private var strikesFile: URL { folder.appendingPathComponent("strikes-" + KokoroVoice.modelName) }
+    private var busyMarker: URL { folder.appendingPathComponent("busy") }
+    private var strikesFile: URL { folder.appendingPathComponent("strikes-" + modelName) }
 
-    private func markBusy() { FileManager.default.createFile(atPath: busyMarker.path, contents: Data()) }
+    private func markBusy() { FileManager.default.createFile(atPath: busyMarker.path, contents: Data((useGPU ? "gpu" : "cpu").utf8)) }
     private func markDone() { try? FileManager.default.removeItem(at: busyMarker) }
 
     /// Changes with every build of the app (the app binary's date).
@@ -98,8 +104,18 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
 
     /// True if the built-in voice should stay off because it seems to keep crashing the app.
     private func crashedBefore() -> Bool {
+        let fm = FileManager.default
+        // The GPU version stopped the app: move this device to the CPU version (one strike is
+        // enough, since the GPU crash happens right away every time), and free its space.
+        if let what = try? String(contentsOf: busyMarker, encoding: .utf8), what == "gpu" {
+            print("My Mibo: the GPU voice stopped the app; switching this device to the CPU voice.")
+            markDone()
+            fm.createFile(atPath: gpuOffMarker.path, contents: Data())
+            try? fm.removeItem(at: folder.appendingPathComponent(KokoroVoice.gpuModel))
+            return false
+        }
         var strikes = readStrikes()
-        if FileManager.default.fileExists(atPath: busyMarker.path) {
+        if fm.fileExists(atPath: busyMarker.path) {
             strikes += 1
             markDone()
             print("My Mibo: the app stopped while the built-in voice was busy (strike \(strikes) of 2).")
@@ -121,10 +137,10 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
         guard status == "off" || status == "failed" else { return }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        for old in KokoroVoice.oldModelNames {   // free the space the old model used
-            try? FileManager.default.removeItem(at: folder.appendingPathComponent(old))
+        try? FileManager.default.createDirectory(at: cacheFolder, withIntermediateDirectories: true)
+        for name in ["off-" + KokoroVoice.cpuModel, "busy-" + KokoroVoice.cpuModel] {   // markers from earlier builds
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
         }
-        try? FileManager.default.removeItem(at: folder.appendingPathComponent("off-" + KokoroVoice.modelName))   // the old one-strike switch
         if crashedBefore() { setStatus("failed"); return }
         if FileManager.default.fileExists(atPath: modelFile.path) { load() } else { download() }
         #endif
@@ -144,7 +160,7 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         config.timeoutIntervalForResource = 60 * 60
         let s = URLSession(configuration: config, delegate: self, delegateQueue: .main)
         session = s
-        s.downloadTask(with: KokoroVoice.modelURL).resume()
+        s.downloadTask(with: modelURL).resume()
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
@@ -187,14 +203,17 @@ final class KokoroVoice: NSObject, URLSessionDownloadDelegate {
         #if canImport(MediaPipeTasksAudio) && !targetEnvironment(simulator)
         setStatus("loading")
         let path = modelFile.path
+        let gpu = useGPU
+        let cache = cacheFolder.path
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 self.markBusy()
                 let options = TextToSpeechOptions(
-                    baseOptions: TTSBaseOptions(modelAssetPath: path, delegate: .cpu),
+                    baseOptions: TTSBaseOptions(modelAssetPath: path, delegate: gpu ? .gpu : .cpu),
                     defaultVoiceId: "af_heart",
-                    speakingRate: 1.0
+                    cacheDirectory: cache
                 )
+                print("My Mibo: loading the \(gpu ? "GPU" : "CPU") voice")
                 let engine = try createTextToSpeech(options: options)
                 self.markDone()
                 DispatchQueue.main.async {

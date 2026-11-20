@@ -41,7 +41,7 @@ iPad and works offline.
 
 - The first time Xcode opens the project it fetches the MediaPipe package
   (File → Packages → Resolve Package Versions if it doesn't start on its own).
-- The first time the app opens, it downloads the voice model (the CPU version, kokoro_int8_fp16)
+- The first time the app opens, it downloads the voice model (the fast GPU version; a device where that crashes switches to the CPU version)
   in the background. Use Wi-Fi. Until it's done, Mibo uses Apple's voices.
   Settings shows the download progress.
 - Each character's Kokoro voice is set in `src/personas.js` (`kokoro:`);
