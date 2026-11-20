@@ -742,7 +742,25 @@ body.no-captions .captions { visibility: hidden; }
     return full;
   }
 
+  /* "Claude, go silent": end the conversation now instead of waiting for the silence timeout */
+  function isSleepCommand(text) {
+    const t = String(text).toLowerCase().replace(/[^a-z\s']/g, " ").replace(/\s+/g, " ").trim();
+    if (!t || t.split(" ").length > 6) return false;   // only short commands, so real questions still go to Claude
+    return /\b(go (silent|quiet|to sleep)|be quiet|stop listening|quiet mode|hush|shush)\b/.test(t);
+  }
+  function goSilent() {
+    interrupt();                              // stop any reply that's still being spoken
+    sessionUntil = 0;
+    submitted = true;
+    clearTimeout(endTimer); clearTimeout(silenceTimer);
+    heard = ""; partial = ""; youEl.textContent = ""; claudeEl.textContent = "";
+    setState("idle");                         // this also arms the wake phrase
+    try { rec && rec.abort(); } catch {}
+    showNote("Going quiet. Say \u201cHey Claude\u201d when you need me.", 4000);
+  }
+
   async function ask(text) {
+    if (isSleepCommand(text)) { goSilent(); return; }
     if (sessionUntil) extendSession();
     if (!haveClaude()) { setState("needkey"); sheet.hidden = false; return; }
     const my = ++turn;
