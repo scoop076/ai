@@ -346,7 +346,7 @@ export default {
       if (AURA_VOICES.includes(body.auraVoice)) patch.auraVoice = body.auraVoice;
       if (body.persona === "claude" || PERSONA_IDS.includes(body.persona)) patch.persona = body.persona;
       const rate = Number(body.rate);
-      if (rate >= 0.7 && rate <= 1.5) patch.rate = rate;
+      if (rate >= 0.5 && rate <= 2) patch.rate = rate;
       return json(await memoryStub(env).setPrefs(patch));
     }
 
