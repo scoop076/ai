@@ -80,6 +80,9 @@ final class NativeAudio: NSObject {
             let session = AVAudioSession.sharedInstance()
             do {
                 try session.setCategory(.playAndRecord, mode: .default, options: options)
+                // iOS silences vibration while the microphone is on (Mibo's nearly always is),
+                // which blocked the "your turn" buzz. Allow it.
+                try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
                 try session.setActive(true)
             } catch {
                 print("My Mibo: audio setup failed: \(error)")
