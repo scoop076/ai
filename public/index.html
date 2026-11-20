@@ -250,6 +250,8 @@ body.no-captions .captions { visibility: hidden; }
     <div id="memBox" style="display:none;gap:14px">
     <h3>Memory</h3>
     <p class="hint" id="memSummary">Everything you say here is remembered across all your screens.</p>
+    <p class="hint" id="memFactsTitle" hidden><strong>About you</strong> (kept for good; say "Mibo, remember…" or "forget…" to change it):</p>
+    <ul class="hint" id="memFacts" hidden style="margin:0;padding-left:18px;line-height:1.5"></ul>
     <div class="memnotes" id="memNotes" hidden></div>
     <button class="quiet" id="forgetBtn" type="button">Forget everything</button>
     </div>
@@ -1565,6 +1567,10 @@ body.no-captions .captions { visibility: hidden; }
       $("#memSummary").textContent = m.messages
         ? "I've saved all " + m.messages + " messages from our conversations" + (since ? " since " + since : "") + ", across every screen. Here's what I keep in mind:"
         : "Nothing saved yet. Everything you say here will be remembered across all your screens.";
+      const facts = m.facts || [], list = $("#memFacts");
+      list.innerHTML = "";
+      for (const f of facts) { const li = document.createElement("li"); li.textContent = f; list.appendChild(li); }
+      list.hidden = $("#memFactsTitle").hidden = !facts.length;
       const notes = $("#memNotes");
       notes.textContent = m.notes || "";
       notes.hidden = !m.notes;
