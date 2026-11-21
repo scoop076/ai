@@ -53,7 +53,9 @@ final class Conversation: ObservableObject {
     // and becomes Jim's next turn. Room noise and quiet chatter don't.
     private var bargeMic = false            // the mic is open while Mibo talks
     private var bargeMicPending = false     // we asked the speaker to open it
-    private var barge = BargeDetector(echo: 0)
+    private var barge = BargeDetector(miboPeak: 0, jimVoice: 0)
+    private var jimRawLevels: [Double] = []   // Jim's voice this turn, on the raw channel
+    private var lastCleanLevel = 8000.0
     private var preroll = Data()            // the last moment of audio, so Jim's first words aren't lost
     private var wasInterrupted = false
     private var interruptedReply = ""       // what Mibo was saying when it was cut off
@@ -70,10 +72,15 @@ final class Conversation: ObservableObject {
     /// An answer started early, when Flux thought Jim was probably done.
     private var early: EarlyReply?
     /// How loud Mibo's own voice (from the TV) is at the speaker; learned as Mibo talks.
-    /// Measured on the speaker's raw channel (no automatic gain) when it sends one; 0 = not learned yet.
-    private var miboEcho: Double {
-        get { UserDefaults.standard.double(forKey: "miboEchoRaw") }
-        set { UserDefaults.standard.set(newValue, forKey: "miboEchoRaw") }
+    /// Learned on the speaker's raw channel (0 = not learned yet): how loud Mibo's voice gets
+    /// at its loudest, and how loud Jim usually talks. Talk-over puts its bar between them.
+    private var miboPeak: Double {
+        get { UserDefaults.standard.double(forKey: "miboPeakRaw") }
+        set { UserDefaults.standard.set(newValue, forKey: "miboPeakRaw") }
+    }
+    private var jimVoice: Double {
+        get { UserDefaults.standard.double(forKey: "jimVoiceRaw") }
+        set { UserDefaults.standard.set(newValue, forKey: "jimVoiceRaw") }
     }
     private var noteClear: DispatchWorkItem?
 
@@ -183,7 +190,7 @@ final class Conversation: ObservableObject {
         expectingFollowUp = false
         if !isFollowUp { sessionUntil = Date().addingTimeInterval(sessionLength) }   // "Hey Mibo" opens a conversation
         vad = VoiceDetector(waitForSpeech: 20)   // seconds to start talking, after "Hey Mibo" or a reply
-        recording = Data()
+        recording = Data(); jimRawLevels = []
         youText = ""
         hearingYou = false
         micLevel = 0
@@ -200,6 +207,7 @@ final class Conversation: ObservableObject {
         if Date() < ignoreAudioUntil { return }   // the tail of Mibo's voice, still coming out of the TV
         recording.append(pcm)
         flux?.send(pcm)
+        if let raw, hearingYou { jimRawLevels.append(BargeDetector.rms(raw)) }
         let level = min(1, vad.lastLevel / 6000)
         micLevel = micLevel * 0.5 + level * 0.5
         switch vad.feed(pcm) {
@@ -237,7 +245,18 @@ final class Conversation: ObservableObject {
     // MARK: One turn
 
     /// Jim finished his turn. `words` comes from Flux; without it, Whisper transcribes the recording.
+    /// Learn how loud Jim talks (raw channel), from a turn where he spoke for a while.
+    private func learnJimVoice() {
+        defer { jimRawLevels = [] }
+        guard jimRawLevels.count >= 20 else { return }
+        let v = BargeDetector.percentile(jimRawLevels, 0.8)
+        guard v > 0 else { return }
+        jimVoice = jimVoice > 0 ? jimVoice * 0.7 + v * 0.3 : v
+        print("My Mibo TV: learned your voice: \(Int(jimVoice))")
+    }
+
     private func finishedTalking(words: String? = nil) {
+        learnJimVoice()
         stopFlux()
         state = .thinking
         micLevel = 0
@@ -356,7 +375,10 @@ final class Conversation: ObservableObject {
 
     private func doneSpeaking(turn my: Int) {
         guard my == turn, state == .speaking else { return }
-        if let v = barge.miboLevel() { miboEcho = miboEcho > 0 ? miboEcho * 0.6 + v * 0.4 : v }
+        if let v = barge.learnedMiboPeak() {
+            miboPeak = miboPeak > 0 ? miboPeak * 0.5 + v * 0.5 : v
+            print("My Mibo TV: learned Mibo's loudest: \(Int(miboPeak))")
+        }
         if bargeMic {
             // The mic is already open, so Jim's turn starts now, with no gap or cue.
             bargeMic = false
@@ -364,7 +386,7 @@ final class Conversation: ObservableObject {
             isFollowUp = true
             expectingFollowUp = false
             vad = VoiceDetector(waitForSpeech: 20)
-            recording = Data(); preroll = Data()
+            recording = Data(); preroll = Data(); jimRawLevels = []
             hearingYou = false; micLevel = 0
             ignoreAudioUntil = Date().addingTimeInterval(0.3)
             state = .listening
@@ -470,7 +492,7 @@ final class Conversation: ObservableObject {
         endRun()                      // frees the speaker for a new run; the reply keeps playing on the TV
         bargeMicPending = true
         expectingFollowUp = true
-        barge = BargeDetector(echo: miboEcho)
+        barge = BargeDetector(miboPeak: miboPeak, jimVoice: jimVoice)
         let my = turn
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, my == self.turn, self.bargeMicPending else { return }
@@ -499,13 +521,14 @@ final class Conversation: ObservableObject {
         if preroll.count > keep { preroll.removeFirst(preroll.count - keep) }
         // Judge loudness on the raw channel: the cleaned-up one has automatic gain, which
         // turns Mibo's voice up when the room is quiet and Jim's down when he's loud.
-        if barge.feed(raw ?? pcm, miboAudible: speaker.isSpeaking) { talkedOver() }
+        lastCleanLevel = BargeDetector.rms(pcm)
+        if let raw, barge.feed(raw, miboAudible: speaker.isSpeaking) { talkedOver() }
     }
 
     /// Jim talked over Mibo: stop mid-word and make what he's saying his next turn.
     private func talkedOver() {
         interruptedReply = spokenSoFar
-        print("My Mibo TV: you talked over Mibo (you \(Int(barge.lastLevel)), Mibo's voice \(Int(barge.miboNow)), needed \(Int(barge.needed)))")
+        print("My Mibo TV: you talked over Mibo (you \(Int(barge.lastLevel)), Mibo's loudest \(Int(barge.peakNow)), needed \(Int(barge.needed)))")
         turn += 1
         replyTask?.cancel(); replyTask = nil
         speaker.onDone = nil
@@ -515,7 +538,8 @@ final class Conversation: ObservableObject {
         isFollowUp = true
         expectingFollowUp = false
         sessionUntil = Date().addingTimeInterval(sessionLength)
-        vad = VoiceDetector(waitForSpeech: 20, talkingAt: barge.lastLevel, floor: roomFloor)
+        vad = VoiceDetector(waitForSpeech: 20, talkingAt: max(lastCleanLevel, 3000), floor: roomFloor)
+        jimRawLevels = []
         // Keep Jim's words from when he started (plus a quarter second), not just the moment
         // Mibo noticed, so the whole question reaches the speech-to-text.
         let back = min(3.0, barge.secondsSinceJimStarted() + 0.25)
@@ -821,92 +845,92 @@ final class EarlyReply {
     }
 }
 
-/// Decides when Jim talks over Mibo. Mibo's voice comes from the TV, so the speaker
-/// hears it as loud room sound; Jim counts only when he's clearly louder than that
-/// (and than a fixed minimum) for about a quarter second.
+/// Decides when Jim talks over Mibo, on the speaker's raw channel (no automatic gain).
+/// It calibrates itself: it learns how loud Mibo's voice gets at its loudest (from Mibo's
+/// replies) and how loud Jim usually talks (from his turns), and puts the bar between
+/// them. Until both are learned it only listens.
 struct BargeDetector {
-    /// How many times louder than Mibo's voice Jim has to be, on the speaker's raw channel.
-    /// (The cleaned-up channel has automatic gain: on Nov 21 it raised Mibo's voice in a
-    /// quiet room to 11,000-16,000, as loud as Jim yelling, so Mibo kept stopping itself.)
-    static let ratio = 2.0
-    /// No fixed floor: the raw channel's scale is different, so the bar is all relative
-    /// to Mibo's own voice, learned as it talks.
-    static let minimum = 0.0
-    /// Until Mibo's voice level has been learned, listen this long before reacting.
-    static let learnFirst = 1.5
-    /// Speech goes up and down between syllables, so Jim counts once he's been above the
-    /// bar for 0.15 s in total within the last 0.6 s (Nov 21: the old "0.25 s straight"
-    /// took several seconds, so his question was mostly over before Mibo stopped).
-    static let needTime = 0.25
-    static let needWindow = 0.8
-    /// Mibo's voice starting up through the TV can spike; don't react to the first moment.
-    static let ignoreFirst = 0.6
+    static let needTime = 0.25       // above the bar this long in total...
+    static let needWindow = 0.8      // ...within this long
+    static let ignoreFirst = 0.6     // Mibo's voice starting up through the TV can spike
+    /// The bar is at least this much above Mibo's loudest.
+    static let overMibo = 1.3
 
-    private let echo: Double             // Mibo's voice level learned from earlier replies
-    private var recent: [Double] = []    // levels over the last few seconds
-    private var audible: [Double] = []   // levels while Mibo's audio was playing
-    private var aboveRecent: [Bool] = []  // was each recent piece above the bar?
-    private var levelsBack: [Double] = [] // levels of the last 3 s, for finding when Jim started
+    private let miboPeak: Double     // learned: Mibo's voice at its loudest (97th percentile)
+    private let jimVoice: Double     // learned: Jim's usual talking level (80th percentile)
+    private var recent: [Double] = []
+    private var aboveRecent: [Bool] = []
+    private var levelsBack: [Double] = []
+    private var miboLevels: [Double] = []
+    private var heardMibo = 0.0
+    private var chunkTime = 0.032
     private var logIn = 1.0
     private var secondPeak = 0.0
     private(set) var lastLevel = 0.0
-    private(set) var miboNow = 0.0
+    private(set) var peakNow = 0.0
     private(set) var needed = 0.0
 
-    init(echo: Double) { self.echo = echo }
+    var ready: Bool { miboPeak > 0 && jimVoice > 0 }
+
+    init(miboPeak: Double, jimVoice: Double) {
+        self.miboPeak = miboPeak
+        self.jimVoice = jimVoice
+    }
 
     mutating func feed(_ pcm: Data, miboAudible: Bool) -> Bool {
-        let n = pcm.count / 2
-        guard n > 0 else { return false }
-        var sum = 0.0
-        pcm.withUnsafeBytes { raw in
-            for i in 0..<n {
-                let v = Double(Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self)))
-                sum += v * v
-            }
-        }
-        let rms = (sum / Double(n)).squareRoot()
-        let dt = Double(n) / 16000
+        let rms = Self.rms(pcm)
+        let dt = Double(pcm.count / 2) / 16000
+        guard dt > 0 else { return false }
+        chunkTime = dt
         lastLevel = rms
-        recent.append(rms)
-        let window = Int(3.0 / dt)
-        if recent.count > window { recent.removeFirst(recent.count - window) }
-        // Mibo's voice: mostly the level learned from earlier replies. The last few seconds
-        // (their median, leaving out the last half second) only raise it if the TV got
-        // louder, and by at most 40%, so Jim's own yelling can't push the bar out of reach.
-        let lag = Int(0.5 / dt)
-        let windowLevel = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.5) : 0
-        miboNow = echo > 0 ? max(echo, min(windowLevel, echo * 1.4)) : windowLevel
-        needed = max(Self.minimum, Self.ratio * miboNow)
         if miboAudible { heardMibo += dt }
-        let settled = heardMibo >= (echo > 0 ? Self.ignoreFirst : Self.learnFirst)
-        aboveRecent.append(rms > needed && needed > 0 && settled)
+        let window = Int(3.0 / dt)
+        recent.append(rms)
+        if recent.count > window { recent.removeFirst(recent.count - window) }
+        // Mibo's loudest over the last few seconds (leaving out the last half second), in
+        // case the TV got louder; it can raise the learned level by at most half.
+        let lag = Int(0.5 / dt)
+        let windowPeak = recent.count > lag + 10 ? Self.percentile(Array(recent.dropLast(lag)), 0.97) : 0
+        if ready {
+            peakNow = max(miboPeak, min(windowPeak, miboPeak * 1.5))
+            needed = max(peakNow * Self.overMibo, (peakNow * jimVoice).squareRoot())
+        } else {
+            peakNow = windowPeak
+            needed = 0
+        }
+        let above = needed > 0 && rms > needed && heardMibo >= Self.ignoreFirst
+        aboveRecent.append(above)
         let w = max(1, Int(Self.needWindow / dt))
         if aboveRecent.count > w { aboveRecent.removeFirst(aboveRecent.count - w) }
-        let loud = Double(aboveRecent.filter { $0 }.count) * dt
         levelsBack.append(rms)
         if levelsBack.count > window { levelsBack.removeFirst(levelsBack.count - window) }
-        chunkTime = dt
-        if miboAudible && (rms < needed || needed == 0) {
-            audible.append(rms)                    // learn Mibo's level from Mibo, not from Jim
-            if audible.count > 6000 { audible.removeFirst(2000) }
+        if miboAudible && !above {
+            miboLevels.append(rms)          // learn Mibo's level from Mibo, not from Jim
+            if miboLevels.count > 9000 { miboLevels.removeFirst(3000) }
         }
         secondPeak = max(secondPeak, rms)
         logIn -= dt
         if logIn <= 0 {
             logIn = 1
-            print("My Mibo TV: over Mibo: loudest \(Int(secondPeak)), Mibo's voice \(Int(miboNow)), needed \(Int(needed))")
+            if ready {
+                print("My Mibo TV: over Mibo: loudest \(Int(secondPeak)), Mibo's loudest \(Int(peakNow)), your voice \(Int(jimVoice)), needed \(Int(needed))")
+            } else {
+                print("My Mibo TV: over Mibo (still learning, can't interrupt yet): loudest \(Int(secondPeak)), Mibo so far \(Int(peakNow)), your voice \(jimVoice > 0 ? String(Int(jimVoice)) : "not learned")")
+            }
             secondPeak = 0
         }
-        return loud >= Self.needTime
+        return Double(aboveRecent.filter { $0 }.count) * dt >= Self.needTime
     }
 
-    private var chunkTime = 0.032
-    private var heardMibo = 0.0
-    /// How many seconds ago Jim started talking: walk back while his voice (well above
-    /// Mibo's) keeps showing up, allowing pauses of up to 0.8 s between words.
+    /// Mibo's loudest during this reply, if Mibo talked long enough to tell.
+    func learnedMiboPeak() -> Double? {
+        miboLevels.count >= 60 ? Self.percentile(miboLevels, 0.97) : nil
+    }
+
+    /// How many seconds ago Jim started talking: walk back while his voice keeps showing
+    /// up, allowing pauses of up to 0.8 s between words.
     func secondsSinceJimStarted() -> Double {
-        let onset = needed * 0.75
+        let onset = max(needed * 0.75, peakNow * 1.1)
         let maxGap = Int(0.8 / chunkTime)
         var start = levelsBack.count - 1
         var gap = 0
@@ -918,9 +942,17 @@ struct BargeDetector {
         return Double(levelsBack.count - start) * chunkTime
     }
 
-    /// Mibo's typical voice level at the speaker during this reply, if there was enough of it.
-    func miboLevel() -> Double? {
-        audible.count >= 30 ? Self.percentile(audible, 0.7) : nil
+    static func rms(_ pcm: Data) -> Double {
+        let n = pcm.count / 2
+        guard n > 0 else { return 0 }
+        var sum = 0.0
+        pcm.withUnsafeBytes { raw in
+            for i in 0..<n {
+                let v = Double(Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self)))
+                sum += v * v
+            }
+        }
+        return (sum / Double(n)).squareRoot()
     }
 
     static func percentile(_ a: [Double], _ p: Double) -> Double {
