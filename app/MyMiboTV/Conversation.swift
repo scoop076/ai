@@ -271,8 +271,9 @@ final class Conversation: ObservableObject {
     private func reply(to wav: Data, words: String?, early head: EarlyReply?, turn my: Int) async {
         guard let server, let link else { return }
         do {
-            let text: String
+            var text: String
             if let words { text = words } else { text = try await server.transcribe(wav) }
+            if wasInterrupted { text = Self.dropOwnLead(text, interruptedReply) }
             guard my == turn else { head?.cancel(); return }
             // Use the early answer only if it was for exactly what Jim ended up saying.
             let useEarly = head.map { Self.sameWords($0.text, text) } ?? false
@@ -424,7 +425,8 @@ final class Conversation: ObservableObject {
         switch e {
         case .update:
             break
-        case .eager(let text):
+        case .eager(let heard):
+            let text = wasInterrupted ? Self.dropOwnLead(heard, interruptedReply) : heard
             // Jim has probably finished: start Mibo's answer now, but hold it.
             guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text),
                   !(wasInterrupted && Self.isOwnWords(text, interruptedReply)) else { return }
@@ -463,6 +465,27 @@ final class Conversation: ObservableObject {
             self.link?.event(.vadEnd)
             self.finishedTalking()
         }
+    }
+
+    /// After a talk-over, the start of what was heard is often the end of Mibo's own sentence
+    /// (it's in the audio kept from before Mibo stopped). Drop a leading run of 3+ words that
+    /// follows Mibo's reply word pair by word pair; Jim's own words won't.
+    static func dropOwnLead(_ heard: String, _ reply: String) -> String {
+        func norm(_ w: Substring) -> String {
+            w.lowercased().replacingOccurrences(of: "[^a-z0-9']", with: "", options: .regularExpression)
+        }
+        let r = reply.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(norm).filter { !$0.isEmpty }
+        guard r.count >= 2 else { return heard }
+        var pairs = Set<String>()
+        for i in 0..<(r.count - 1) { pairs.insert(r[i] + " " + r[i + 1]) }
+        let raw = heard.split(separator: " ")
+        let h = raw.map(norm)
+        var run = 0
+        while run + 1 < h.count && pairs.contains(h[run] + " " + h[run + 1]) { run += 1 }
+        guard run >= 2 else { return heard }            // 3+ words in Mibo's order
+        let rest = raw.dropFirst(run + 1).joined(separator: " ")
+        print("My Mibo TV: dropped my own words: \(raw.prefix(run + 1).joined(separator: " "))")
+        return rest.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Are these words (nearly) all from what Mibo was saying?
