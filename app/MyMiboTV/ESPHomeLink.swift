@@ -14,7 +14,9 @@ final class ESPHomeLink {
         case disconnected
         case start          // the speaker heard "Hey Mibo" (or we asked it to listen)
         case stop           // the speaker wants us to stop (wake word or "stop" while busy, or its button)
-        case audio(Data)    // 16 kHz, 16-bit, mono PCM
+        /// 16 kHz, 16-bit, mono PCM: the cleaned-up channel (for speech to text) and, if the
+        /// speaker sends it, the raw channel with no automatic gain (for judging loudness).
+        case audio(Data, Data?)
     }
 
     /// Voice assistant events we send back; they drive the speaker's light ring.
@@ -157,7 +159,10 @@ final class ESPHomeLink {
         case 90:                                         // VoiceAssistantRequest
             emit(m.bool(1) ? .start : .stop)
         case 106:                                        // VoiceAssistantAudio
-            if let d = m.bytes(1), !d.isEmpty { emit(.audio(Data(d))) }
+            if let d = m.bytes(1), !d.isEmpty {
+                let raw = m.bytes(3).flatMap { $0.isEmpty ? nil : Data($0) }
+                emit(.audio(Data(d), raw))
+            }
         default:
             break
         }

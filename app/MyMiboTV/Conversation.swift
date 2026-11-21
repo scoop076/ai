@@ -70,9 +70,10 @@ final class Conversation: ObservableObject {
     /// An answer started early, when Flux thought Jim was probably done.
     private var early: EarlyReply?
     /// How loud Mibo's own voice (from the TV) is at the speaker; learned as Mibo talks.
+    /// Measured on the speaker's raw channel (no automatic gain) when it sends one; 0 = not learned yet.
     private var miboEcho: Double {
-        get { let v = UserDefaults.standard.double(forKey: "miboEcho"); return v > 0 ? v : 6000 }
-        set { UserDefaults.standard.set(newValue, forKey: "miboEcho") }
+        get { UserDefaults.standard.double(forKey: "miboEchoRaw") }
+        set { UserDefaults.standard.set(newValue, forKey: "miboEchoRaw") }
     }
     private var noteClear: DispatchWorkItem?
 
@@ -161,8 +162,8 @@ final class Conversation: ObservableObject {
             let interrupted = state == .speaking || state == .thinking
             cancelTurn()
             if interrupted { keepListening() }
-        case .audio(let d):
-            heard(d)
+        case .audio(let d, let raw):
+            heard(d, raw: raw)
         }
     }
 
@@ -193,8 +194,8 @@ final class Conversation: ObservableObject {
         startFlux()
     }
 
-    private func heard(_ pcm: Data) {
-        if bargeMic && state == .speaking { hearOverMibo(pcm); return }
+    private func heard(_ pcm: Data, raw: Data? = nil) {
+        if bargeMic && state == .speaking { hearOverMibo(pcm, raw: raw); return }
         guard state == .listening else { return }
         if Date() < ignoreAudioUntil { return }   // the tail of Mibo's voice, still coming out of the TV
         recording.append(pcm)
@@ -355,7 +356,7 @@ final class Conversation: ObservableObject {
 
     private func doneSpeaking(turn my: Int) {
         guard my == turn, state == .speaking else { return }
-        if let v = barge.miboLevel() { miboEcho = miboEcho * 0.6 + v * 0.4 }
+        if let v = barge.miboLevel() { miboEcho = miboEcho > 0 ? miboEcho * 0.6 + v * 0.4 : v }
         if bargeMic {
             // The mic is already open, so Jim's turn starts now, with no gap or cue.
             bargeMic = false
@@ -492,11 +493,13 @@ final class Conversation: ObservableObject {
         link.event(.sttStart)
     }
 
-    private func hearOverMibo(_ pcm: Data) {
+    private func hearOverMibo(_ pcm: Data, raw: Data?) {
         preroll.append(pcm)
         let keep = 16000 * 2 * 3                // the last 3 s
         if preroll.count > keep { preroll.removeFirst(preroll.count - keep) }
-        if barge.feed(pcm, miboAudible: speaker.isSpeaking) { talkedOver() }
+        // Judge loudness on the raw channel: the cleaned-up one has automatic gain, which
+        // turns Mibo's voice up when the room is quiet and Jim's down when he's loud.
+        if barge.feed(raw ?? pcm, miboAudible: speaker.isSpeaking) { talkedOver() }
     }
 
     /// Jim talked over Mibo: stop mid-word and make what he's saying his next turn.
@@ -822,12 +825,15 @@ final class EarlyReply {
 /// hears it as loud room sound; Jim counts only when he's clearly louder than that
 /// (and than a fixed minimum) for about a quarter second.
 struct BargeDetector {
-    /// How many times louder than Mibo's voice Jim has to be. The speaker's audio chip
-    /// evens out loudness (automatic gain), so a yell only measures about 1.5-2.5 times
-    /// Mibo's voice (Nov 21 test: Mibo about 6,400, Jim yelling 12,000-17,000).
-    static let ratio = 1.7
-    /// Never interrupt for anything quieter than this (room noise is about 250-2,000).
-    static let minimum = 9000.0
+    /// How many times louder than Mibo's voice Jim has to be, on the speaker's raw channel.
+    /// (The cleaned-up channel has automatic gain: on Nov 21 it raised Mibo's voice in a
+    /// quiet room to 11,000-16,000, as loud as Jim yelling, so Mibo kept stopping itself.)
+    static let ratio = 2.0
+    /// No fixed floor: the raw channel's scale is different, so the bar is all relative
+    /// to Mibo's own voice, learned as it talks.
+    static let minimum = 0.0
+    /// Until Mibo's voice level has been learned, listen this long before reacting.
+    static let learnFirst = 1.5
     /// Speech goes up and down between syllables, so Jim counts once he's been above the
     /// bar for 0.15 s in total within the last 0.6 s (Nov 21: the old "0.25 s straight"
     /// took several seconds, so his question was mostly over before Mibo stopped).
@@ -870,17 +876,18 @@ struct BargeDetector {
         // louder, and by at most 40%, so Jim's own yelling can't push the bar out of reach.
         let lag = Int(0.5 / dt)
         let windowLevel = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.5) : 0
-        miboNow = max(echo, min(windowLevel, echo * 1.4))
+        miboNow = echo > 0 ? max(echo, min(windowLevel, echo * 1.4)) : windowLevel
         needed = max(Self.minimum, Self.ratio * miboNow)
         if miboAudible { heardMibo += dt }
-        aboveRecent.append(rms > needed && heardMibo >= Self.ignoreFirst)
+        let settled = heardMibo >= (echo > 0 ? Self.ignoreFirst : Self.learnFirst)
+        aboveRecent.append(rms > needed && needed > 0 && settled)
         let w = max(1, Int(Self.needWindow / dt))
         if aboveRecent.count > w { aboveRecent.removeFirst(aboveRecent.count - w) }
         let loud = Double(aboveRecent.filter { $0 }.count) * dt
         levelsBack.append(rms)
         if levelsBack.count > window { levelsBack.removeFirst(levelsBack.count - window) }
         chunkTime = dt
-        if miboAudible && rms < needed {
+        if miboAudible && (rms < needed || needed == 0) {
             audible.append(rms)                    // learn Mibo's level from Mibo, not from Jim
             if audible.count > 6000 { audible.removeFirst(2000) }
         }
@@ -899,7 +906,7 @@ struct BargeDetector {
     /// How many seconds ago Jim started talking: walk back while his voice (well above
     /// Mibo's) keeps showing up, allowing pauses of up to 0.8 s between words.
     func secondsSinceJimStarted() -> Double {
-        let onset = max(Self.minimum * 0.7, needed * 0.75)
+        let onset = needed * 0.75
         let maxGap = Int(0.8 / chunkTime)
         var start = levelsBack.count - 1
         var gap = 0
