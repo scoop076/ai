@@ -1596,12 +1596,15 @@ script:
       # MIBO: cutoffs for the custom Hey Mibo model (out of 255).
       - lambda: |-
           const StringRef sensitivity = id(wake_word_sensitivity).current_option();
+          // Nov 21: Jim often had to say "Hey Mibo" more than once at 0.89, so every level moved
+          // one step more eager. (The setting is remembered on the speaker, so the levels
+          // themselves changed rather than the default.)
           if (sensitivity == "Slightly sensitive") {
-            id(hey_mibo).set_probability_cutoff(242);     // 0.95
-          } else if (sensitivity == "Moderately sensitive") {
             id(hey_mibo).set_probability_cutoff(227);     // 0.89, no false wake-ups in training's noise test
-          } else if (sensitivity == "Very sensitive") {
+          } else if (sensitivity == "Moderately sensitive") {
             id(hey_mibo).set_probability_cutoff(204);     // 0.80
+          } else if (sensitivity == "Very sensitive") {
+            id(hey_mibo).set_probability_cutoff(184);     // 0.72
           }
 
   # Script used activate the stop word if the TTS step is long.
