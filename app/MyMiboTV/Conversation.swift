@@ -56,6 +56,8 @@ final class Conversation: ObservableObject {
     private var barge = BargeDetector(echo: 0)
     private var preroll = Data()            // the last moment of audio, so Jim's first words aren't lost
     private var wasInterrupted = false
+    private var interruptedReply = ""       // what Mibo was saying when it was cut off
+    private var spokenSoFar = ""            // the reply Mibo is saying now
     private var roomFloor = 500.0
     private var ignoreAudioUntil = Date.distantPast
 
@@ -262,6 +264,15 @@ final class Conversation: ObservableObject {
                 keepListening()
                 return
             }
+            if wasInterrupted && Self.isOwnWords(text, interruptedReply) {
+                // The "interruption" was Mibo hearing itself through the TV: say nothing.
+                print("My Mibo TV: that was my own voice: \(text)")
+                if useEarly { head?.cancel() }
+                wasInterrupted = false
+                endRun(); state = .idle
+                keepListening()
+                return
+            }
             if Self.isSleepCommand(text) {
                 if useEarly { head?.cancel() }
                 youText = text
@@ -277,6 +288,7 @@ final class Conversation: ObservableObject {
             wasInterrupted = false
 
             var pending = "", full = "", started = false
+            spokenSoFar = ""
             speaker.begin()
             speaker.onDone = { [weak self] in self?.doneSpeaking(turn: my) }
             let answer: AsyncThrowingStream<MiboServer.ChatEvent, Error>
@@ -293,6 +305,7 @@ final class Conversation: ObservableObject {
                 case .persona(let p): setPersona(p)
                 case .text(let t):
                     pending += t; full += t
+                    spokenSoFar = full
                     // Wait until we know it isn't the "[quiet]" signal before speaking.
                     if Self.mayBeQuietSignal(full) { continue }
                     while case let (chunk, rest)? = Self.nextChunk(pending, first: !started) {
@@ -390,7 +403,8 @@ final class Conversation: ObservableObject {
             break
         case .eager(let text):
             // Jim has probably finished: start Mibo's answer now, but hold it.
-            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text) else { return }
+            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text),
+                  !(wasInterrupted && Self.isOwnWords(text, interruptedReply)) else { return }
             if let early, Self.sameWords(early.text, text) { return }
             early?.cancel()
             print("My Mibo TV: probably done: \(text)")
@@ -426,6 +440,17 @@ final class Conversation: ObservableObject {
             self.link?.event(.vadEnd)
             self.finishedTalking()
         }
+    }
+
+    /// Are these words (nearly) all from what Mibo was saying?
+    static func isOwnWords(_ heard: String, _ reply: String) -> Bool {
+        func words(_ s: String) -> [String] {
+            s.lowercased().replacingOccurrences(of: "[^a-z0-9' ]", with: " ", options: .regularExpression)
+                .split(separator: " ").map(String.init)
+        }
+        let h = words(heard), r = Set(words(reply))
+        guard !h.isEmpty, !r.isEmpty else { return false }
+        return Double(h.filter { r.contains($0) }.count) / Double(h.count) >= 0.8
     }
 
     static func sameWords(_ a: String, _ b: String) -> Bool {
@@ -476,6 +501,7 @@ final class Conversation: ObservableObject {
 
     /// Jim talked over Mibo: stop mid-word and make what he's saying his next turn.
     private func talkedOver() {
+        interruptedReply = spokenSoFar
         print("My Mibo TV: you talked over Mibo (you \(Int(barge.lastLevel)), Mibo's voice \(Int(barge.miboNow)), needed \(Int(barge.needed)))")
         turn += 1
         replyTask?.cancel(); replyTask = nil
@@ -633,6 +659,7 @@ final class Conversation: ObservableObject {
             "You can search the web for current or specific information.",
             "When it fits naturally, you may end with a short question to keep the conversation going.",
             "Speech-to-text often mishears your name Mibo as Miguel, Meebo, Mabel or Nibo; treat those as your name.",
+            "In a conversation with you, a clear request or question (like \"tell me a story\" or \"what's a music box?\") is for you, even without your name; answer it.",
             "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
             "Apologize only when a real mistake truly calls for it, once and briefly, then move on. Once something is corrected, don't restate or re-correct it or remind Jim of past mistakes unless he asks or it affects what he's doing now.",
@@ -804,8 +831,10 @@ struct BargeDetector {
     /// Speech goes up and down between syllables, so Jim counts once he's been above the
     /// bar for 0.15 s in total within the last 0.6 s (Nov 21: the old "0.25 s straight"
     /// took several seconds, so his question was mostly over before Mibo stopped).
-    static let needTime = 0.15
-    static let needWindow = 0.6
+    static let needTime = 0.25
+    static let needWindow = 0.8
+    /// Mibo's voice starting up through the TV can spike; don't react to the first moment.
+    static let ignoreFirst = 0.6
 
     private let echo: Double             // Mibo's voice level learned from earlier replies
     private var recent: [Double] = []    // levels over the last few seconds
@@ -843,7 +872,8 @@ struct BargeDetector {
         let windowLevel = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.5) : 0
         miboNow = max(echo, min(windowLevel, echo * 1.4))
         needed = max(Self.minimum, Self.ratio * miboNow)
-        aboveRecent.append(rms > needed)
+        if miboAudible { heardMibo += dt }
+        aboveRecent.append(rms > needed && heardMibo >= Self.ignoreFirst)
         let w = max(1, Int(Self.needWindow / dt))
         if aboveRecent.count > w { aboveRecent.removeFirst(aboveRecent.count - w) }
         let loud = Double(aboveRecent.filter { $0 }.count) * dt
@@ -865,6 +895,7 @@ struct BargeDetector {
     }
 
     private var chunkTime = 0.032
+    private var heardMibo = 0.0
     /// How many seconds ago Jim started talking: walk back while his voice (well above
     /// Mibo's) keeps showing up, allowing pauses of up to 0.8 s between words.
     func secondsSinceJimStarted() -> Double {
