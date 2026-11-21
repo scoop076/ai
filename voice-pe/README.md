@@ -18,6 +18,7 @@ follow-up. Saying "Hey Mibo" or "stop" while Mibo is talking interrupts.
 | File | What it is |
 |---|---|
 | `train_hey_mibo.ipynb` | Google Colab notebook that trains the "Hey Mibo" wake word (made by `make_notebook.py`) |
+| `train_hush.ipynb` | Colab notebook that trains one "shut up / quiet" word, heard only while Mibo talks (made by `make_notebook.py`) |
 | `hey_mibo/` | The trained wake word, once it's made (`hey_mibo.json` + `hey_mibo.tflite`) |
 | `mibo-voice.yaml` | The Voice PE firmware (the official firmware with a few changes, each marked `MIBO:`) |
 | `mibo-voice-device.yaml` | The small file you paste into the ESPHome Device Builder; it pulls `mibo-voice.yaml` from GitHub and adds your Wi-Fi |
@@ -93,6 +94,13 @@ also answers the link `mibo://`: use `media_content_type: url`, `media_content_i
 
 My Mibo lets go of the speaker when you leave it (Home button or another app), so the next "Hey Mibo"
 opens it again. Free signing expires after 7 days; an expired app can't be opened this way either.
+
+### Interrupting Mibo
+While Mibo is talking, the speaker listens for **"stop"**, **"Hey Mibo"** and just **"Mibo"** (more eagerly than
+usual, since the TV's sound drowns you out). Any of them stops Mibo at once and puts it in quiet mode, without
+answering. Say "Hey Mibo" to start again. "Shut up" and "quiet" will work the same way once the hush word is
+trained: open https://colab.research.google.com/github/scoop076/ai/blob/main/voice-pe/train_hush.ipynb, run it
+like the Hey Mibo notebook, and send Claude `hush.zip`.
 
 ## Good to know
 - **Voice:** the built-in Kokoro voice engine (Google MediaPipe) only runs on iPhone and iPad, so the Apple TV

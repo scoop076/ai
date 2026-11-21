@@ -128,11 +128,12 @@ final class Conversation: ObservableObject {
         case .start:
             startListening()
         case .stop:
-            // "Hey Mibo" or "stop" while Mibo was thinking or talking: stop, then listen
-            // (so "Hey Mibo" interrupts). While listening it just cancels.
-            let interrupted = state == .speaking || state == .thinking
+            // "Stop", "Hey Mibo", "Mibo" (or later "shut up"/"quiet") heard by the speaker
+            // while Mibo was thinking, talking or listening: stop right away and go to
+            // quiet mode without answering. "Hey Mibo" starts a new conversation.
             cancelTurn()
-            if interrupted { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { _ = self.link?.listenAgain() } }
+            sessionUntil = nil
+            print("My Mibo TV: interrupted, going quiet")
         case .audio(let d):
             heard(d)
         }
@@ -414,6 +415,7 @@ final class Conversation: ObservableObject {
             "You can search the web for current or specific information.",
             "When it fits naturally, you may end with a short question to keep the conversation going.",
             "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
+            "Never say the words stop, quiet, or shut up, or your own name, in your replies: the speaker in the room listens for them while you talk and would cut you off. Use other words, like halt, calm, or hush.",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
             "Apologize only when a real mistake truly calls for it, once and briefly, then move on. Once something is corrected, don't restate or re-correct it or remind Jim of past mistakes unless he asks or it affects what he's doing now.",
             "The current date and time is \(f.string(from: Date())).",

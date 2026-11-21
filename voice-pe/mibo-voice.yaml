@@ -1615,10 +1615,18 @@ script:
           condition:
             switch.is_off: timer_ringing
           then:
+            # MIBO: while Mibo talks, the TV's sound drowns out your voice, so be more
+            # eager: "stop" at 0.35 (was 0.50) and "Hey Mibo" at 0.60, low enough that
+            # just "Mibo" usually counts. Mibo is told never to say these words.
+            - lambda: |-
+                id(stop).set_probability_cutoff(89);       // 0.35
+                id(hey_mibo).set_probability_cutoff(153);  // 0.60
             - micro_wake_word.enable_model: stop
             - wait_until:
                 not:
                   voice_assistant.is_running:
+            - lambda: id(stop).set_probability_cutoff(128);  // 0.50, the model's own
+            - script.execute: apply_wake_word_sensitivity
             - if:
                 condition:
                   switch.is_off: timer_ringing

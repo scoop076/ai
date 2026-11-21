@@ -1,4 +1,4 @@
-# Builds train_hey_mibo.ipynb (run: python3 make_notebook.py).
+# Builds train_hey_mibo.ipynb and train_hush.ipynb (run: python3 make_notebook.py).
 # The notebook trains the "Hey Mibo" wake word for the Mibo Voice speaker on
 # Google Colab, using microWakeWord (github.com/kahrendt/microWakeWord).
 import json
@@ -288,19 +288,55 @@ except ImportError:
     print("Made hey_mibo.zip")
 """)
 
-nb = {
-    "cells": cells,
-    "metadata": {
-        "accelerator": "GPU",
-        "colab": {"provenance": [], "gpuType": "T4"},
-        "kernelspec": {"display_name": "Python 3", "name": "python3"},
-        "language_info": {"name": "python"},
-    },
-    "nbformat": 4,
-    "nbformat_minor": 0,
-}
-for c in nb["cells"]:
-    lines = c["source"].split("\n")
-    c["source"] = [l + "\n" for l in lines[:-1]] + [lines[-1]]
-json.dump(nb, open("train_hey_mibo.ipynb", "w"), indent=1)
-print("wrote train_hey_mibo.ipynb with", len(cells), "cells")
+def save(cells, name):
+    nb = {
+        "cells": cells,
+        "metadata": {
+            "accelerator": "GPU",
+            "colab": {"provenance": [], "gpuType": "T4"},
+            "kernelspec": {"display_name": "Python 3", "name": "python3"},
+            "language_info": {"name": "python"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 0,
+    }
+    for c in nb["cells"]:
+        lines = c["source"].split("\n")
+        c["source"] = [l + "\n" for l in lines[:-1]] + [lines[-1]]
+    json.dump(nb, open(name, "w"), indent=1)
+    print("wrote", name, "with", len(cells), "cells")
+
+import copy
+hush_cells = copy.deepcopy(cells)
+save(cells, "train_hey_mibo.ipynb")
+
+# The "hush" model: one model that hears "shut up" or "quiet" (the speaker only
+# listens for it while Mibo is talking, to cut Mibo off and go quiet).
+HUSH = [
+    ('WAKE_PHRASES = ["hey meebo", "Hey Meebo.", "Hey, Meebo!", "hey mee bo", "Hey meebo?", "hey meebow"]',
+     'WAKE_PHRASES = ["shut up", "Shut up!", "Shut up.", "quiet", "Quiet!", "Quiet.", "be quiet", "Be quiet!", "shush, quiet"]'),
+    ('# Ways of writing "Hey Mibo" so the computer voices say MEE-bo (light o).',
+     '# "Shut up" and "quiet", said different ways.'),
+    ("""NOT_WAKE = [
+    "hey jimbo", "hey jumbo", "hey dumbo", "hey bimbo", "hey rambo", "hey gizmo", "hey nemo", "hey memo",
+    "hey milo", "hey mabel", "hey mira", "hey mama", "hey baby", "hey buddy", "hey bo", "hey me",
+    "hey elbow", "hey neighbor", "maybe so", "me too", "rainbow", "hey siri", "hey google", "hey jarvis",
+    "okay nabu", "hey you", "hey there", "hey mike", "hey leo", "a bimbo", "hey bingo", "TV remote",
+]""",
+     """NOT_WAKE = [
+    "what's up", "set up", "cut up", "shut it down", "shoot", "shutter", "shot up", "sit up", "shape up",
+    "quite", "quit", "quite right", "quiet please no", "diet", "riot", "quinoa", "kite", "client", "coyote",
+    "quietly", "a quiet night", "acquired", "inquire", "squid", "quick", "quilt", "cute", "suit up", "shush",
+    "hey mibo", "okay", "thank you", "of course", "shopping", "chocolate",
+]"""),
+    ("hey_mibo", "hush"),
+    ('"wake_word": "Hey Mibo"', '"wake_word": "Hush"'),
+    ('Train the "Hey Mibo" wake word', 'Train the "shut up / quiet" word'),
+    ('so you can check they sound like "MEE-bo"', 'so you can check they sound right'),
+    ('samples of "Hey Mibo"', 'samples of "shut up" and "quiet"'),
+    ('trains the "Hey Mibo" wake word', 'trains the "shut up / quiet" word'),
+]
+for c in hush_cells:
+    for a, b in HUSH:
+        c["source"] = c["source"].replace(a, b)
+save(hush_cells, "train_hush.ipynb")
