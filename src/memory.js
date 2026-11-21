@@ -27,6 +27,17 @@ export class Memory extends DurableObject {
     );
   }
 
+  // Early replies the app has committed (kept in memory for a couple of minutes).
+  commitDraft(id) {
+    if (!this.drafts) this.drafts = new Map();
+    const now = Date.now();
+    for (const [k, t] of this.drafts) if (now - t > 120000) this.drafts.delete(k);
+    this.drafts.set(String(id), now);
+  }
+  isDraftCommitted(id) {
+    return !!(this.drafts && this.drafts.has(String(id)));
+  }
+
   getValue(k) {
     const rows = this.sql.exec("SELECT v FROM kv WHERE k = ?", k).toArray();
     return rows.length ? rows[0].v : null;

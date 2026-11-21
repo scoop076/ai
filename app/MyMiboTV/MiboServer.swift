@@ -63,14 +63,36 @@ struct MiboServer {
     }
 
     /// Mibo's reply, streamed as it's written.
-    func chat(text: String, system: String, model: String, device: String) -> AsyncThrowingStream<ChatEvent, Error> {
+    /// Keep an early reply (see `chat(draft:)`).
+    func commit(draft: String) async {
+        var r = request("api/chat/commit", method: "POST")
+        r.setValue("application/json", forHTTPHeaderField: "content-type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["draft": draft])
+        _ = try? await URLSession.shared.data(for: r)
+    }
+
+    /// A live connection that turns the mic into words as Jim talks.
+    func listen() -> FluxStream {
+        var c = URLComponents(url: Self.base.appendingPathComponent("api/listen"), resolvingAgainstBaseURL: false)!
+        c.scheme = "wss"
+        var r = URLRequest(url: c.url!)
+        r.setValue(clientID, forHTTPHeaderField: "CF-Access-Client-Id")
+        r.setValue(clientSecret, forHTTPHeaderField: "CF-Access-Client-Secret")
+        return FluxStream(request: r)
+    }
+
+    /// Mibo's reply, streamed as it's written. With a draft id it's an early reply:
+    /// the server only keeps it once `commit(draft:)` is called.
+    func chat(text: String, system: String, model: String, device: String, draft: String? = nil) -> AsyncThrowingStream<ChatEvent, Error> {
         AsyncThrowingStream { cont in
             let task = Task {
                 do {
                     var r = request("api/chat", method: "POST")
                     r.timeoutInterval = 90
                     r.setValue("application/json", forHTTPHeaderField: "content-type")
-                    r.httpBody = try JSONSerialization.data(withJSONObject: ["text": text, "system": system, "model": model, "device": device])
+                    var body: [String: Any] = ["text": text, "system": system, "model": model, "device": device]
+                    if let draft { body["draft"] = draft }
+                    r.httpBody = try JSONSerialization.data(withJSONObject: body)
                     let (bytes, resp) = try await URLSession.shared.bytes(for: r)
                     if let h = resp as? HTTPURLResponse, !(200..<300).contains(h.statusCode) {
                         var body = Data()
@@ -111,5 +133,94 @@ struct MiboServer {
         let (d, resp) = try await URLSession.shared.data(for: r)
         try check(resp, d)
         return d
+    }
+}
+
+/// Live speech to text (Deepgram Flux on Workers AI, through the Worker's /api/listen):
+/// send the microphone as it comes in; get the words, and Flux's guesses about when
+/// Jim has finished his turn, back.
+final class FluxStream {
+    enum Event {
+        case update(String)          // the words so far this turn
+        case eager(String)           // Jim has probably finished (start thinking, but hold the answer)
+        case resumed                 // ...he hadn't
+        case endOfTurn(String)       // he has
+        case failed(String)
+    }
+    var onEvent: ((Event) -> Void)?  // always called on the main queue
+
+    private let task: URLSessionWebSocketTask
+    private var batch = Data()
+    private var closed = false
+
+    init(request: URLRequest) {
+        task = URLSession.shared.webSocketTask(with: request)
+        task.resume()
+        receive()
+    }
+
+    /// 16 kHz, 16-bit mono PCM. Sent in pieces of at least 50 ms.
+    func send(_ pcm: Data) {
+        guard !closed else { return }
+        batch.append(pcm)
+        guard batch.count >= 1600 else { return }
+        let piece = batch
+        batch = Data()
+        task.send(.data(piece)) { [weak self] err in
+            if let err { self?.fail("send: \(err.localizedDescription)") }
+        }
+    }
+
+    func close() {
+        guard !closed else { return }
+        closed = true
+        onEvent = nil
+        task.send(.string("{\"type\":\"CloseStream\"}")) { _ in }
+        task.cancel(with: .normalClosure, reason: nil)
+    }
+
+    private func receive() {
+        task.receive { [weak self] result in
+            guard let self, !self.closed else { return }
+            switch result {
+            case .failure(let e):
+                self.fail(e.localizedDescription)
+            case .success(let msg):
+                var data: Data?
+                switch msg {
+                case .string(let s): data = Data(s.utf8)
+                case .data(let d): data = d
+                @unknown default: break
+                }
+                if let data, let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    self.handle(j)
+                }
+                self.receive()
+            }
+        }
+    }
+
+    private func handle(_ j: [String: Any]) {
+        let text = ((j["transcript"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let ev: Event?
+        switch j["event"] as? String {
+        case "Update", "StartOfTurn": ev = .update(text)
+        case "EagerEndOfTurn": ev = .eager(text)
+        case "TurnResumed": ev = .resumed
+        case "EndOfTurn": ev = .endOfTurn(text)
+        default:
+            if (j["type"] as? String)?.lowercased().contains("error") == true {
+                ev = .failed((j["description"] as? String) ?? (j["message"] as? String) ?? "Flux error")
+            } else { ev = nil }
+        }
+        guard let ev else { return }
+        DispatchQueue.main.async { [weak self] in self?.onEvent?(ev) }
+    }
+
+    private func fail(_ why: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.closed else { return }
+            self.onEvent?(.failed(why))
+        }
     }
 }

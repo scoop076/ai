@@ -58,6 +58,15 @@ final class Conversation: ObservableObject {
     private var wasInterrupted = false
     private var roomFloor = 500.0
     private var ignoreAudioUntil = Date.distantPast
+
+    // Live words (Deepgram Flux): Jim's speech is turned into words while he talks, and
+    // Flux decides when he's finished, so Mibo can answer sooner. Whisper is the backup.
+    private var flux: FluxStream?
+    private var fluxLast = Date.distantPast       // when Flux last said anything
+    private var fluxOffUntil = Date.distantPast   // after a failure, use Whisper for a while
+    private var localEnded = false                // our own pause detector thinks Jim stopped
+    /// An answer started early, when Flux thought Jim was probably done.
+    private var early: EarlyReply?
     /// How loud Mibo's own voice (from the TV) is at the speaker; learned as Mibo talks.
     private var miboEcho: Double {
         get { let v = UserDefaults.standard.double(forKey: "miboEcho"); return v > 0 ? v : 6000 }
@@ -166,6 +175,7 @@ final class Conversation: ObservableObject {
         }
         turn += 1
         bargeMicPending = false; bargeMic = false
+        early?.cancel(); early = nil
         isFollowUp = expectingFollowUp
         expectingFollowUp = false
         if !isFollowUp { sessionUntil = Date().addingTimeInterval(sessionLength) }   // "Hey Mibo" opens a conversation
@@ -178,6 +188,7 @@ final class Conversation: ObservableObject {
         link.event(.runStart)
         link.event(.sttStart)
         state = .listening
+        startFlux()
     }
 
     private func heard(_ pcm: Data) {
@@ -185,6 +196,7 @@ final class Conversation: ObservableObject {
         guard state == .listening else { return }
         if Date() < ignoreAudioUntil { return }   // the tail of Mibo's voice, still coming out of the TV
         recording.append(pcm)
+        flux?.send(pcm)
         let level = min(1, vad.lastLevel / 6000)
         micLevel = micLevel * 0.5 + level * 0.5
         switch vad.feed(pcm) {
@@ -194,10 +206,16 @@ final class Conversation: ObservableObject {
             hearingYou = true
             link?.event(.vadStart)
         case .speechEnded:
+            if flux != nil {
+                // Flux decides when Jim is done; our own pause detector is only the backup.
+                if !localEnded { localEnded = true; checkFluxAlive(turn: turn) }
+                return
+            }
             print("My Mibo TV: you finished talking (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
             link?.event(.vadEnd); finishedTalking()
         case .nothingSaid:
             print("My Mibo TV: heard nothing (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
+            stopFlux()
             endRun(); state = .idle
             keepListening()
         }
@@ -215,27 +233,37 @@ final class Conversation: ObservableObject {
 
     // MARK: One turn
 
-    private func finishedTalking() {
+    /// Jim finished his turn. `words` comes from Flux; without it, Whisper transcribes the recording.
+    private func finishedTalking(words: String? = nil) {
+        stopFlux()
         state = .thinking
         micLevel = 0
         let wav = VoiceDetector.wav(recording)
         recording = Data()
         let my = turn
-        replyTask = Task { await self.reply(to: wav, turn: my) }
+        let head = early
+        early = nil
+        replyTask = Task { await self.reply(to: wav, words: words, early: head, turn: my) }
     }
 
-    private func reply(to wav: Data, turn my: Int) async {
+    private func reply(to wav: Data, words: String?, early head: EarlyReply?, turn my: Int) async {
         guard let server, let link else { return }
         do {
-            let text = try await server.transcribe(wav)
-            guard my == turn else { return }
+            let text: String
+            if let words { text = words } else { text = try await server.transcribe(wav) }
+            guard my == turn else { head?.cancel(); return }
+            // Use the early answer only if it was for exactly what Jim ended up saying.
+            let useEarly = head.map { Self.sameWords($0.text, text) } ?? false
+            if !useEarly { head?.cancel() }
             link.event(.sttEnd, [("text", text)])
             if text.isEmpty || Self.isNoise(text) {
+                if useEarly { head?.cancel() }
                 endRun(); state = .idle
                 keepListening()
                 return
             }
             if Self.isSleepCommand(text) {
+                if useEarly { head?.cancel() }
                 youText = text
                 sessionUntil = nil
                 endRun(); state = .idle
@@ -251,7 +279,15 @@ final class Conversation: ObservableObject {
             var pending = "", full = "", started = false
             speaker.begin()
             speaker.onDone = { [weak self] in self?.doneSpeaking(turn: my) }
-            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp, interrupted: interruptedNow), model: "claude-haiku-5-5", device: settings.screenName) {
+            let answer: AsyncThrowingStream<MiboServer.ChatEvent, Error>
+            if useEarly, let head {
+                print("My Mibo TV: using the early answer")
+                Task { await server.commit(draft: head.draft) }
+                answer = head.events()
+            } else {
+                answer = server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp, interrupted: interruptedNow), model: "claude-haiku-5-5", device: settings.screenName)
+            }
+            for try await ev in answer {
                 guard my == turn else { return }
                 switch ev {
                 case .persona(let p): setPersona(p)
@@ -318,12 +354,86 @@ final class Conversation: ObservableObject {
             hearingYou = false; micLevel = 0
             ignoreAudioUntil = Date().addingTimeInterval(0.3)
             state = .listening
+            startFlux()
             return
         }
         if bargeMicPending { state = .idle; return }   // the mic is on its way; it becomes Jim's turn
         endRun()
         state = .idle
         keepListening()
+    }
+
+    // MARK: Live words (Flux)
+
+    private func startFlux() {
+        stopFlux()
+        localEnded = false
+        guard let server, Date() > fluxOffUntil else { return }
+        let f = server.listen()
+        let my = turn
+        fluxLast = Date()
+        f.onEvent = { [weak self] e in self?.fluxEvent(e, turn: my) }
+        flux = f
+    }
+
+    private func stopFlux() {
+        flux?.close()
+        flux = nil
+        localEnded = false
+    }
+
+    private func fluxEvent(_ e: FluxStream.Event, turn my: Int) {
+        guard my == turn, state == .listening, flux != nil else { return }
+        fluxLast = Date()
+        switch e {
+        case .update:
+            break
+        case .eager(let text):
+            // Jim has probably finished: start Mibo's answer now, but hold it.
+            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text) else { return }
+            if let early, Self.sameWords(early.text, text) { return }
+            early?.cancel()
+            print("My Mibo TV: probably done: \(text)")
+            early = EarlyReply(text: text, stream: { draft in
+                server.chat(text: text, system: Self.rules(screen: self.settings.screenName, justWoken: !self.isFollowUp, interrupted: self.wasInterrupted), model: "claude-haiku-5-5", device: self.settings.screenName, draft: draft)
+            })
+        case .resumed:
+            early?.cancel(); early = nil
+        case .endOfTurn(let text):
+            // Only once Jim himself has spoken this turn (Flux also hears other people).
+            guard hearingYou else { return }
+            print("My Mibo TV: you finished talking (live words): \(text)")
+            link?.event(.vadEnd)
+            finishedTalking(words: text)
+        case .failed(let why):
+            print("My Mibo TV: live words failed (\(why)); using Whisper for a while")
+            fluxOffUntil = Date().addingTimeInterval(10 * 60)
+            stopFlux()
+            early?.cancel(); early = nil
+            if localEnded || vad.isDone { link?.event(.vadEnd); finishedTalking() }
+        }
+    }
+
+    /// Our own pause detector thinks Jim stopped. Flux normally decides, but if it has
+    /// gone quiet, fall back to Whisper so Mibo never just hangs.
+    private func checkFluxAlive(turn my: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, my == self.turn, self.state == .listening, self.flux != nil else { return }
+            if Date().timeIntervalSince(self.fluxLast) < 1.5 { self.checkFluxAlive(turn: my); return }
+            print("My Mibo TV: live words went quiet; using Whisper")
+            self.stopFlux()
+            self.early?.cancel(); self.early = nil
+            self.link?.event(.vadEnd)
+            self.finishedTalking()
+        }
+    }
+
+    static func sameWords(_ a: String, _ b: String) -> Bool {
+        func norm(_ s: String) -> String {
+            s.lowercased().replacingOccurrences(of: "[^a-z0-9' ]", with: " ", options: .regularExpression)
+                .split(separator: " ").joined(separator: " ")
+        }
+        return norm(a) == norm(b)
     }
 
     // MARK: Talking over Mibo
@@ -378,6 +488,8 @@ final class Conversation: ObservableObject {
         sessionUntil = Date().addingTimeInterval(sessionLength)
         vad = VoiceDetector(waitForSpeech: 20, talkingAt: barge.lastLevel, floor: roomFloor)
         recording = preroll; preroll = Data()
+        startFlux()
+        flux?.send(recording)
         youText = ""
         hearingYou = true
         micLevel = 0
@@ -407,6 +519,8 @@ final class Conversation: ObservableObject {
         speaker.stop()
         if end && (state != .idle || bargeMic) { endRun() }
         bargeMic = false; bargeMicPending = false
+        stopFlux()
+        early?.cancel(); early = nil
         expectingFollowUp = false
         state = .idle
     }
@@ -541,6 +655,8 @@ struct VoiceDetector {
     private(set) var peak = 0.0
     private(set) var lastLevel = 0.0
     var background: Double { max(0, floor) }
+    /// Jim talked and has now paused long enough to count as done.
+    var isDone: Bool { talking && quietTime > 0.8 }
 
     init(waitForSpeech: Double = 7) { self.waitForSpeech = waitForSpeech }
 
@@ -599,6 +715,73 @@ struct VoiceDetector {
         d.append(contentsOf: Array("data".utf8)); u32(UInt32(pcm.count))
         d.append(pcm)
         return d
+    }
+}
+
+/// An answer started before Jim had certainly finished. It collects Claude's reply as it
+/// streams, so if Jim did finish with those exact words, Mibo can start speaking at once.
+/// The server only keeps it in memory once the app commits it.
+@MainActor
+final class EarlyReply {
+    let text: String
+    let draft = UUID().uuidString
+    private var buffered: [MiboServer.ChatEvent] = []
+    private var finished = false
+    private var failure: Error?
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var task: Task<Void, Never>?
+
+    init(text: String, stream: (String) -> AsyncThrowingStream<MiboServer.ChatEvent, Error>) {
+        self.text = text
+        let s = stream(draft)
+        task = Task { [weak self] in
+            do {
+                for try await e in s { self?.buffered.append(e); self?.wake() }
+                self?.finished = true
+            } catch {
+                self?.failure = error
+                self?.finished = true
+            }
+            self?.wake()
+        }
+    }
+
+    func cancel() {
+        task?.cancel(); task = nil
+        failure = failure ?? CancellationError()
+        finished = true
+        wake()
+    }
+
+    /// Everything so far, then the rest as it arrives.
+    func events() -> AsyncThrowingStream<MiboServer.ChatEvent, Error> {
+        AsyncThrowingStream { cont in
+            let reader = Task { @MainActor [weak self] in
+                var i = 0
+                while let self {
+                    if i < self.buffered.count { cont.yield(self.buffered[i]); i += 1; continue }
+                    if let f = self.failure { cont.finish(throwing: f); return }
+                    if self.finished { cont.finish(); return }
+                    await withCheckedContinuation { self.waiter = $0 }
+                }
+                cont.finish(throwing: CancellationError())
+            }
+            // If Mibo is cut off while using this answer, stop fetching the rest too.
+            cont.onTermination = { [weak self] _ in
+                reader.cancel()
+                Task { @MainActor in self?.stopIfUnfinished() }
+            }
+        }
+    }
+
+    private func stopIfUnfinished() {
+        if !finished { cancel() }
+    }
+
+    private func wake() {
+        let w = waiter
+        waiter = nil
+        w?.resume()
     }
 }
 
