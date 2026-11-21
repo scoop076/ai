@@ -94,6 +94,15 @@ also answers the link `mibo://`: use `media_content_type: url`, `media_content_i
 My Mibo lets go of the speaker when you leave it (Home button or another app), so the next "Hey Mibo"
 opens it again. Free signing expires after 7 days; an expired app can't be opened this way either.
 
+### Talking over Mibo
+In a conversation the speaker's mic stays open while Mibo talks. Talk firmly over Mibo and it stops mid-word;
+what you say becomes your next turn ("stop", "quiet", "shut up", "that's enough" put Mibo in quiet mode; anything
+else gets answered; if it wasn't meant for Mibo, Mibo stays stopped). You have to be clearly louder than Mibo's
+own voice at the speaker (2.2 times, and at least 6,000), so room noise doesn't count. Mibo learns how loud its
+voice is at the speaker as it talks. Outside a conversation only "Hey Mibo" does anything.
+The Xcode console prints "over Mibo: level …, Mibo's voice …, needed …" once a second while Mibo talks, and
+"you talked over Mibo" when it stops, for tuning.
+
 ## Good to know
 - **Voice:** the built-in Kokoro voice engine (Google MediaPipe) only runs on iPhone and iPad, so the Apple TV
   speaks with the free Cloudflare Aura voices (each personality has one). If the daily free allowance runs out,

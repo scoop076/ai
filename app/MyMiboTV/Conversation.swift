@@ -47,6 +47,22 @@ final class Conversation: ObservableObject {
     var showWakeHint: Bool { state == .idle && sessionUntil == nil && speakerConnected && !needsSetup }
     private var turn = 0
     private var replyTask: Task<Void, Never>?
+
+    // Talking over Mibo. While Mibo answers in a conversation, the speaker's mic stays
+    // open; a firm voice, well above Mibo's own voice coming from the TV, cuts Mibo off
+    // and becomes Jim's next turn. Room noise and quiet chatter don't.
+    private var bargeMic = false            // the mic is open while Mibo talks
+    private var bargeMicPending = false     // we asked the speaker to open it
+    private var barge = BargeDetector(echo: 0)
+    private var preroll = Data()            // the last moment of audio, so Jim's first words aren't lost
+    private var wasInterrupted = false
+    private var roomFloor = 500.0
+    private var ignoreAudioUntil = Date.distantPast
+    /// How loud Mibo's own voice (from the TV) is at the speaker; learned as Mibo talks.
+    private var miboEcho: Double {
+        get { let v = UserDefaults.standard.double(forKey: "miboEcho"); return v > 0 ? v : 6000 }
+        set { UserDefaults.standard.set(newValue, forKey: "miboEcho") }
+    }
     private var noteClear: DispatchWorkItem?
 
     init() {
@@ -123,16 +139,17 @@ final class Conversation: ObservableObject {
             show("Connected to \(name). Say \u{201C}Hey Mibo.\u{201D}", for: 5)
         case .disconnected:
             speakerConnected = false
+            bargeMic = false; bargeMicPending = false
             if state == .listening { state = .idle }
             show("Looking for the Mibo Voice speaker\u{2026}", for: 0)
         case .start:
-            startListening()
+            if bargeMicPending && state == .speaking { openBargeMic() } else { startListening() }
         case .stop:
-            // "Hey Mibo" or "stop" while Mibo was thinking or talking: stop, then listen
-            // (so "Hey Mibo" interrupts). While listening it just cancels.
+            // "Hey Mibo" or "stop" while Mibo was thinking or talking: Mibo stops and
+            // stays stopped, listening (inside a conversation). While listening it just cancels.
             let interrupted = state == .speaking || state == .thinking
             cancelTurn()
-            if interrupted { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { _ = self.link?.listenAgain() } }
+            if interrupted { keepListening() }
         case .audio(let d):
             heard(d)
         }
@@ -148,6 +165,7 @@ final class Conversation: ObservableObject {
             return
         }
         turn += 1
+        bargeMicPending = false; bargeMic = false
         isFollowUp = expectingFollowUp
         expectingFollowUp = false
         if !isFollowUp { sessionUntil = Date().addingTimeInterval(sessionLength) }   // "Hey Mibo" opens a conversation
@@ -163,13 +181,16 @@ final class Conversation: ObservableObject {
     }
 
     private func heard(_ pcm: Data) {
+        if bargeMic && state == .speaking { hearOverMibo(pcm); return }
         guard state == .listening else { return }
+        if Date() < ignoreAudioUntil { return }   // the tail of Mibo's voice, still coming out of the TV
         recording.append(pcm)
         let level = min(1, vad.lastLevel / 6000)
         micLevel = micLevel * 0.5 + level * 0.5
         switch vad.feed(pcm) {
         case .waiting: break
         case .speechStarted:
+            roomFloor = max(150, vad.background)
             hearingYou = true
             link?.event(.vadStart)
         case .speechEnded:
@@ -224,11 +245,13 @@ final class Conversation: ObservableObject {
             youText = text
             sessionUntil = Date().addingTimeInterval(sessionLength)
             link.event(.intentStart)
+            let interruptedNow = wasInterrupted
+            wasInterrupted = false
 
             var pending = "", full = "", started = false
             speaker.begin()
             speaker.onDone = { [weak self] in self?.doneSpeaking(turn: my) }
-            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp), model: "claude-haiku-5-5", device: settings.screenName) {
+            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp, interrupted: interruptedNow), model: "claude-haiku-5-5", device: settings.screenName) {
                 guard my == turn else { return }
                 switch ev {
                 case .persona(let p): setPersona(p)
@@ -243,6 +266,7 @@ final class Conversation: ObservableObject {
                             link.event(.intentEnd)
                             link.event(.ttsStart, [("text", String(full.prefix(400)))])
                             state = .speaking
+                            requestBargeMic()
                         }
                         speaker.add(chunk)
                     }
@@ -263,6 +287,7 @@ final class Conversation: ObservableObject {
                     link.event(.intentEnd)
                     link.event(.ttsStart, [("text", String(full.prefix(400)))])
                     state = .speaking
+                    requestBargeMic()
                 }
                 speaker.add(pending)
             }
@@ -281,9 +306,83 @@ final class Conversation: ObservableObject {
 
     private func doneSpeaking(turn my: Int) {
         guard my == turn, state == .speaking else { return }
+        if let v = barge.miboLevel() { miboEcho = miboEcho * 0.6 + v * 0.4 }
+        if bargeMic {
+            // The mic is already open, so Jim's turn starts now, with no gap or cue.
+            bargeMic = false
+            turn += 1
+            isFollowUp = true
+            expectingFollowUp = false
+            vad = VoiceDetector(waitForSpeech: 20)
+            recording = Data(); preroll = Data()
+            hearingYou = false; micLevel = 0
+            ignoreAudioUntil = Date().addingTimeInterval(0.3)
+            state = .listening
+            return
+        }
+        if bargeMicPending { state = .idle; return }   // the mic is on its way; it becomes Jim's turn
         endRun()
         state = .idle
         keepListening()
+    }
+
+    // MARK: Talking over Mibo
+
+    /// Mibo just started answering: open the speaker's mic so Jim can talk over it.
+    private func requestBargeMic() {
+        guard inSession, link != nil, !bargeMic, !bargeMicPending else { return }
+        endRun()                      // frees the speaker for a new run; the reply keeps playing on the TV
+        bargeMicPending = true
+        expectingFollowUp = true
+        barge = BargeDetector(echo: miboEcho)
+        let my = turn
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, my == self.turn, self.bargeMicPending else { return }
+            if self.link?.listenAgain() != true { self.bargeMicPending = false }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.bargeMicPending else { return }
+            self.bargeMicPending = false
+            if self.state == .idle { self.keepListening() }
+        }
+    }
+
+    private func openBargeMic() {
+        bargeMicPending = false
+        guard let link else { return }
+        bargeMic = true
+        preroll = Data()
+        link.acceptStart()
+        link.event(.runStart)
+        link.event(.sttStart)
+    }
+
+    private func hearOverMibo(_ pcm: Data) {
+        preroll.append(pcm)
+        let keep = 16000 * 2 * 4 / 10           // 0.4 s
+        if preroll.count > keep { preroll.removeFirst(preroll.count - keep) }
+        if barge.feed(pcm, miboAudible: speaker.isSpeaking) { talkedOver() }
+    }
+
+    /// Jim talked over Mibo: stop mid-word and make what he's saying his next turn.
+    private func talkedOver() {
+        print("My Mibo TV: you talked over Mibo (you \(Int(barge.lastLevel)), Mibo's voice \(Int(barge.miboNow)), needed \(Int(barge.needed)))")
+        turn += 1
+        replyTask?.cancel(); replyTask = nil
+        speaker.onDone = nil
+        speaker.stop()
+        bargeMic = false
+        wasInterrupted = true
+        isFollowUp = true
+        expectingFollowUp = false
+        sessionUntil = Date().addingTimeInterval(sessionLength)
+        vad = VoiceDetector(waitForSpeech: 20, talkingAt: barge.lastLevel, floor: roomFloor)
+        recording = preroll; preroll = Data()
+        youText = ""
+        hearingYou = true
+        micLevel = 0
+        link?.event(.vadStart)
+        state = .listening
     }
 
     private func endRun() { link?.event(.runEnd) }
@@ -306,7 +405,8 @@ final class Conversation: ObservableObject {
         turn += 1
         replyTask?.cancel(); replyTask = nil
         speaker.stop()
-        if end && state != .idle { endRun() }
+        if end && (state != .idle || bargeMic) { endRun() }
+        bargeMic = false; bargeMicPending = false
         expectingFollowUp = false
         state = .idle
     }
@@ -402,7 +502,7 @@ final class Conversation: ObservableObject {
                 "mibo", "collinsville", "mibo collinsville", "meebo", "hey mibo"].contains(t)
     }
 
-    static func rules(screen: String, justWoken: Bool = false) -> String {
+    static func rules(screen: String, justWoken: Bool = false, interrupted: Bool = false) -> String {
         let f = DateFormatter()
         f.dateFormat = "EEEE, MMMM d, yyyy, h:mm a"
         return [
@@ -420,6 +520,8 @@ final class Conversation: ObservableObject {
             "Jim is talking to you right now from the screen he calls \"\(screen)\", which is an Apple TV. He talks to you through the Mibo Voice speaker in the room, and you appear and speak on the TV. The frame can run on several of his screens around the house and on his phone. Use this naturally when it matters, for example if he asks where you are or which screen he's on, but don't announce it otherwise.",
         ].joined(separator: " ") + (justWoken
             ? " Jim just said \"Hey Mibo\", so this message is for you: answer it (never reply [quiet] to it)."
+            : "") + (interrupted
+            ? " Someone just talked over you while you were answering, so you stopped partway and only the beginning of your last reply was heard. If it was Jim talking to you, respond to what he said (keep it short). If it was someone else, or not meant for you, reply [quiet] and stay stopped; don't resume the old answer unless Jim asks."
             : "")
     }
 }
@@ -441,6 +543,15 @@ struct VoiceDetector {
     var background: Double { max(0, floor) }
 
     init(waitForSpeech: Double = 7) { self.waitForSpeech = waitForSpeech }
+
+    /// Start already "talking" (Jim talked over Mibo), at this loudness.
+    init(waitForSpeech: Double, talkingAt level: Double, floor: Double) {
+        self.waitForSpeech = waitForSpeech
+        self.floor = floor
+        talking = true
+        voicePeak = level
+        peak = level
+    }
 
     mutating func feed(_ pcm: Data) -> Result {
         let n = pcm.count / 2
@@ -488,6 +599,73 @@ struct VoiceDetector {
         d.append(contentsOf: Array("data".utf8)); u32(UInt32(pcm.count))
         d.append(pcm)
         return d
+    }
+}
+
+/// Decides when Jim talks over Mibo. Mibo's voice comes from the TV, so the speaker
+/// hears it as loud room sound; Jim counts only when he's clearly louder than that
+/// (and than a fixed minimum) for about a quarter second.
+struct BargeDetector {
+    /// How many times louder than Mibo's voice Jim has to be.
+    static let ratio = 2.2
+    /// Never interrupt for anything quieter than this (room noise is about 250-2,000;
+    /// Jim's voice about 15,000-23,000).
+    static let minimum = 6000.0
+    static let needTime = 0.25
+
+    private let echo: Double             // Mibo's voice level learned from earlier replies
+    private var recent: [Double] = []    // levels over the last few seconds
+    private var audible: [Double] = []   // levels while Mibo's audio was playing
+    private var loud = 0.0
+    private var logIn = 1.0
+    private(set) var lastLevel = 0.0
+    private(set) var miboNow = 0.0
+    private(set) var needed = 0.0
+
+    init(echo: Double) { self.echo = echo }
+
+    mutating func feed(_ pcm: Data, miboAudible: Bool) -> Bool {
+        let n = pcm.count / 2
+        guard n > 0 else { return false }
+        var sum = 0.0
+        pcm.withUnsafeBytes { raw in
+            for i in 0..<n {
+                let v = Double(Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self)))
+                sum += v * v
+            }
+        }
+        let rms = (sum / Double(n)).squareRoot()
+        let dt = Double(n) / 16000
+        lastLevel = rms
+        recent.append(rms)
+        let window = Int(3.0 / dt)
+        if recent.count > window { recent.removeFirst(recent.count - window) }
+        if miboAudible {
+            audible.append(rms)
+            if audible.count > 6000 { audible.removeFirst(2000) }
+        }
+        // Mibo's voice right now: a loud-ish level from the last few seconds, leaving out
+        // the last half second (which may already be Jim).
+        let lag = Int(0.5 / dt)
+        miboNow = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.8) : 0
+        needed = max(Self.minimum, Self.ratio * max(echo, miboNow))
+        loud = rms > needed ? loud + dt : max(0, loud - dt)
+        logIn -= dt
+        if logIn <= 0 {
+            logIn = 1
+            print("My Mibo TV: over Mibo: level \(Int(rms)), Mibo's voice \(Int(max(echo, miboNow))), needed \(Int(needed))")
+        }
+        return loud >= Self.needTime
+    }
+
+    /// Mibo's typical voice level at the speaker during this reply, if there was enough of it.
+    func miboLevel() -> Double? {
+        audible.count >= 30 ? Self.percentile(audible, 0.7) : nil
+    }
+
+    static func percentile(_ a: [Double], _ p: Double) -> Double {
+        let s = a.sorted()
+        return s[min(s.count - 1, max(0, Int(Double(s.count - 1) * p)))]
     }
 }
 
