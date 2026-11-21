@@ -96,19 +96,30 @@ final class Speaker: NSObject, ObservableObject {
         }
     }
 
-    /// Say a short cue right now, outside the reply queue.
+    /// Say a short cue right now, outside the reply queue, in Mibo's own voice. If it isn't
+    /// fetched yet, fetch it now; only if that fails does the Apple TV's voice say it.
     func cue(_ text: String) {
-        if let d = cueAudio[voice + "|" + text], let p = try? AVAudioPlayer(data: d, fileTypeHint: AVFileType.mp3.rawValue) {
-            p.enableRate = true
-            p.rate = rate
-            cuePlayer = p
-            p.play()
-        } else {
-            let u = AVSpeechUtterance(string: Self.forVoice(text))
-            u.rate = AVSpeechUtteranceDefaultSpeechRate * min(1.3, max(0.7, rate))
-            synth.speak(u)
-            prepareCue(text)
+        let key = voice + "|" + text
+        if let d = cueAudio[key] { playCue(d); return }
+        let v = voice
+        Task {
+            if let server, let d = try? await server.speech(Self.forVoice(text), voice: v) {
+                self.cueAudio[v + "|" + text] = d
+                self.playCue(d)
+            } else {
+                let u = AVSpeechUtterance(string: Self.forVoice(text))
+                u.rate = AVSpeechUtteranceDefaultSpeechRate * min(1.3, max(0.7, self.rate))
+                self.synth.speak(u)
+            }
         }
+    }
+
+    private func playCue(_ d: Data) {
+        guard let p = try? AVAudioPlayer(data: d, fileTypeHint: AVFileType.mp3.rawValue) else { return }
+        p.enableRate = true
+        p.rate = rate
+        cuePlayer = p
+        p.play()
     }
 
     // MARK: -
