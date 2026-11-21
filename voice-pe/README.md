@@ -1,0 +1,81 @@
+# Mibo on the Apple TV, with the Voice PE as its ears
+
+```
+"Hey Mibo" ─▶ Mibo Voice (Voice PE) ──Wi-Fi──▶ My Mibo on the Apple TV ──▶ ai.liljimjim.com
+               hears the wake word,             face, captions, voice       Whisper (speech to text)
+               streams your voice                                           Claude, memory, Aura voice
+```
+
+The Voice PE listens for "Hey Mibo" on its own. When it hears it, it sends your
+voice straight to the My Mibo app on the Apple TV (no Home Assistant in between).
+The Apple TV sends it to the server to be turned into words, asks Claude, and
+speaks the answer through the TV. The Voice PE's light ring follows along
+(listening, thinking, talking), and after Mibo answers it listens again for a
+follow-up. Saying "Hey Mibo" or "stop" while Mibo is talking interrupts.
+
+## Files
+
+| File | What it is |
+|---|---|
+| `train_hey_mibo.ipynb` | Google Colab notebook that trains the "Hey Mibo" wake word (made by `make_notebook.py`) |
+| `hey_mibo/` | The trained wake word, once it's made (`hey_mibo.json` + `hey_mibo.tflite`) |
+| `mibo-voice.yaml` | The Voice PE firmware (the official firmware with a few changes, each marked `MIBO:`) |
+| `mibo-voice-device.yaml` | The small file you paste into the ESPHome Device Builder; it pulls `mibo-voice.yaml` from GitHub and adds your Wi-Fi |
+| `../app/MyMiboTV.xcodeproj` | The Apple TV app |
+
+## Setup, in order
+
+### 1. Train "Hey Mibo"
+Open the notebook in Colab:
+https://colab.research.google.com/github/scoop076/ai/blob/main/voice-pe/train_hey_mibo.ipynb
+
+Follow the steps at the top (T4 GPU, Run all, then Run all again). It takes
+1½–2 hours and downloads `hey_mibo.zip`. Send that zip to Claude to add to
+the repo as `voice-pe/hey_mibo/`.
+
+### 2. A service token so the Apple TV can reach the server
+The Apple TV can't sign in through a browser, so it uses a Cloudflare Access service token.
+1. Cloudflare dashboard → **Zero Trust** → **Access controls** (or **Access**) → **Service credentials** → **Service Tokens** → **Create Service Token**.
+   Name it `Mibo Apple TV`, duration **Non-expiring**. Copy the **Client ID** and **Client Secret** (the secret is shown only once).
+2. **Access** → **Applications** → the ai.liljimjim.com application → **Policies** → **Add a policy**:
+   Action **Service Auth**, Include **Service Token** = `Mibo Apple TV`. Save.
+
+### 3. Flash the Voice PE
+In Home Assistant, open the **ESPHome Device Builder** add-on (install it from the Add-on Store if it isn't there).
+1. **+ New Device** → Continue → name it `mibo-voice` → ESP32-S3 → Skip.
+2. **Edit** the new `mibo-voice.yaml` and replace everything with the contents of `mibo-voice-device.yaml`.
+3. The first install has to find the Voice PE at its old name. Under `wifi:`, add one line with the Voice PE's
+   current address (Home Assistant → Settings → Devices → ESPHome shows it, like `home-assistant-voice-0a1b2c`):
+   ```yaml
+     use_address: home-assistant-voice-0a1b2c.local
+   ```
+4. **Save** → **Install** → **Wirelessly**. The first build takes a while.
+5. When it's done, remove the `use_address` line and save (from now on it's `mibo-voice.local`).
+6. In Home Assistant → Settings → Devices → ESPHome: delete the old "Home Assistant Voice" device, and
+   **ignore** the newly discovered "Mibo Voice". If Home Assistant connects to it, it takes over the
+   microphone and the Apple TV can't use it.
+
+To go back to the original firmware anytime: esphome.github.io/home-assistant-voice-pe.
+
+### 4. Build the Apple TV app
+1. On the Studio Mac, open `app/MyMiboTV.xcodeproj` in Xcode.
+2. Pair the Studio Apple TV: on the Apple TV, Settings → Remotes and Devices → Remote App and Devices;
+   in Xcode, Window → Devices and Simulators, pick the Apple TV and enter the code.
+3. Pick your team under Signing & Capabilities (the same Personal Team as the iPad app), choose the Apple TV, and Run.
+4. Allow **local network** access when the Apple TV asks.
+5. Settings opens by itself the first time: paste the Client ID and Client Secret (when the keyboard appears,
+   your iPhone offers to type for you). Leave the speaker address as `mibo-voice.local`.
+
+Press and hold the remote's click button for Settings. Click once to talk (it opens the Voice PE's
+microphone) or to stop Mibo talking. Play/Pause also stops Mibo.
+
+## Good to know
+- **Voice:** the built-in Kokoro voice engine (Google MediaPipe) only runs on iPhone and iPad, so the Apple TV
+  speaks with the free Cloudflare Aura voices (each personality has one). If the daily free allowance runs out,
+  it falls back to the Apple TV's own voice.
+- **Cost:** speech to text is Whisper on Cloudflare Workers AI, about a twentieth of a cent per minute of talking.
+- **Free signing** expires after 7 days, like the iPad app; rebuild from Xcode to renew.
+- **Wake word licence:** the noise recordings used in training are for non-commercial use, so this "Hey Mibo"
+  model is for home use only.
+- **Tuning:** if Mibo cuts you off or waits too long after you stop, the Xcode console prints lines like
+  `heard nothing (loudest 180, background 40)`. Send those to Claude to adjust the listening levels.

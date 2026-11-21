@@ -17,6 +17,7 @@ const CLAUDE_MODELS = ["claude-haiku-5-5", "claude-sonnet-5-5"];
 const NOTES_MODEL = "claude-haiku-5-5";
 const ELEVEN_MODELS = ["eleven_flash_v2_5", "eleven_multilingual_v2"];
 const AURA_MODEL = "@cf/deepgram/aura-2-en";
+const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const AURA_VOICES = ["amalthea", "andromeda", "apollo", "arcas", "aries", "asteria", "athena", "atlas", "aurora", "callista", "cora", "cordelia", "delia", "draco", "electra", "harmonia", "helena", "hera", "hermes", "hyperion", "iris", "janus", "juno", "jupiter", "luna", "mars", "minerva", "neptune", "odysseus", "ophelia", "orion", "orpheus", "pandora", "phoebe", "pluto", "saturn", "thalia", "theia", "vesta", "zeus"];
 const ENGINES = ["eleven", "aura", "device"];
 
@@ -491,6 +492,30 @@ export default {
         audio = bytes;
       }
       return new Response(audio, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
+    }
+
+    // Speech to text for the Apple TV app: 16 kHz WAV in, words out (Whisper on
+    // Workers AI, about a twentieth of a cent per minute of audio).
+    if (url.pathname === "/api/transcribe" && request.method === "POST") {
+      if (!env.AI) return json({ error: "Workers AI isn't connected." }, 503);
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      if (bytes.length < 1000) return json({ text: "" });
+      if (bytes.length > 2_000_000) return json({ error: "That recording is too long." }, 413);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      try {
+        const out = await env.AI.run(WHISPER_MODEL, {
+          audio: btoa(bin),
+          language: "en",
+          vad_filter: true,
+          // Names Whisper should expect to hear.
+          initial_prompt: "Mibo, Collinsville.",
+        });
+        return json({ text: String((out && out.text) || "").trim() });
+      } catch (e) {
+        const msg = String((e && e.message) || e);
+        return json({ error: msg.slice(0, 200) }, /limit|neuron|quota|exceed|capacity/i.test(msg) ? 429 : 502);
+      }
     }
 
     // ElevenLabs: the account's voices

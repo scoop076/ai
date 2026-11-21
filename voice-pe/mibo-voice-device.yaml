@@ -1,0 +1,12 @@
+# Paste this into the ESPHome Device Builder as mibo-voice.yaml.
+# It pulls the Mibo Voice firmware from GitHub and adds your Wi-Fi.
+packages:
+  mibo:
+    url: https://github.com/scoop076/ai
+    ref: main
+    files: [voice-pe/mibo-voice.yaml]
+    refresh: 0s
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
