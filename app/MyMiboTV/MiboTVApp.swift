@@ -35,9 +35,9 @@ struct ContentView: View {
                     .padding(.bottom, 70)
             }
 
-            // Mibo's doze: fades to almost black, the face just faintly visible.
+            // Mibo's doze: fades to dark, with the face still softly visible (Jim: 0.9 was too dark).
             Color.black
-                .opacity(convo.dozing ? 0.9 : 0)
+                .opacity(convo.dozing ? 0.75 : 0)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .animation(.easeInOut(duration: convo.dozing ? 4 : 0.6), value: convo.dozing)
