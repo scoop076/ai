@@ -132,6 +132,13 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
   text-align: center; z-index: 2; pointer-events: none; white-space: nowrap;
 }
 
+/* Mibo's doze: after a while with nothing going on, the screen fades almost to black. */
+body::after {
+  content: ""; position: fixed; inset: 0; background: #000; opacity: 0;
+  pointer-events: none; z-index: 50; transition: opacity 0.6s ease;
+}
+body.dozing::after { opacity: 0.9; transition: opacity 4s ease; }
+
 .sheet {
   position: absolute; z-index: 4;
   top: calc(env(safe-area-inset-top, 0px) + 64px);
@@ -434,8 +441,29 @@ body.no-captions .captions { visibility: hidden; }
     if (between) { state = s; return; }   // a split-second pause between listening turns: change nothing on screen
     state = s; statusEl.textContent = STATUS[s]; document.body.classList.toggle("is-listening", s === "listening");
     if (s === "idle") setTimeout(armWake, 400); else disarmWake();
+    if (s !== "idle") wakeScreen();
     reportState();
   }
+
+  /* Doze: after 10 quiet minutes the screen fades almost to black. "Hey Mibo" or a tap wakes it;
+     a tap while dozing only wakes the screen. */
+  const DOZE_AFTER = 10 * 60 * 1000;
+  let lastActive = Date.now();
+  const isDozing = () => document.body.classList.contains("dozing");
+  function wakeScreen() { lastActive = Date.now(); document.body.classList.remove("dozing"); }
+  setInterval(() => {
+    if (state !== "idle" || !sheet.hidden || document.hidden) { lastActive = Date.now(); return; }
+    if (!isDozing() && Date.now() - lastActive > DOZE_AFTER) document.body.classList.add("dozing");
+  }, 15000);
+  let swallowClick = false;
+  document.addEventListener("pointerdown", (e) => {
+    if (isDozing()) { swallowClick = true; e.stopPropagation(); e.preventDefault(); }
+    wakeScreen();
+  }, true);
+  document.addEventListener("click", (e) => {
+    if (swallowClick) { swallowClick = false; e.stopPropagation(); e.preventDefault(); }
+  }, true);
+  document.addEventListener("keydown", wakeScreen, true);
   // Send the captions (Jim's words as he speaks, and Mibo's reply) to the app, so the phone
   // can show them while Mibo is on the TV. Checked a few times a second; sent only when they change.
   let sentYou = null, sentMibo = null;
