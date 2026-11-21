@@ -58,6 +58,12 @@ struct ContentView: View {
                     .lineLimit(2)
                     .truncationMode(.head)
             }
+            if convo.showWakeHint && speaker.line.isEmpty {
+                Text("Say \u{201C}Hey Mibo\u{201D}")
+                    .font(.system(size: 40, weight: .medium))
+                    .foregroundStyle(Mibo.eye.opacity(0.6))
+                    .transition(.opacity)
+            }
             if !speaker.line.isEmpty {
                 karaoke(speaker.line, said: speaker.wordsSaid)
                     .font(.system(size: 46, weight: .semibold))
@@ -66,6 +72,7 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.4), value: convo.showWakeHint)
     }
 
     private func karaoke(_ line: String, said: Int) -> Text {

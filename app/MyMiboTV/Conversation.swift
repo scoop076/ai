@@ -30,9 +30,11 @@ final class Conversation: ObservableObject {
     private var expectingFollowUp = false
     /// A conversation stays open (Mibo keeps listening) until Jim says "go quiet",
     /// or until nobody has talked for this long.
-    private var sessionUntil: Date?
+    @Published private var sessionUntil: Date?
     private let sessionLength: TimeInterval = 5 * 60
     private var inSession: Bool { (sessionUntil ?? .distantPast) > Date() }
+    /// Quiet mode: show the "Say Hey Mibo" hint on the TV.
+    var showWakeHint: Bool { state == .idle && sessionUntil == nil && speakerConnected && !needsSetup }
     private var turn = 0
     private var replyTask: Task<Void, Never>?
     private var noteClear: DispatchWorkItem?
@@ -227,6 +229,7 @@ final class Conversation: ObservableObject {
         } catch {
             guard my == turn, !(error is CancellationError) else { return }
             speaker.stop()
+            sessionUntil = nil
             link.event(.error, [("code", "mibo-error"), ("message", String(error.localizedDescription.prefix(120)))])
             endRun()
             state = .idle
@@ -262,6 +265,7 @@ final class Conversation: ObservableObject {
             guard speakerConnected else { show("The Mibo Voice speaker isn't connected yet.", for: 4); return }
             _ = link?.listenAgain()
         case .speaking, .thinking:
+            sessionUntil = nil
             cancelTurn()
         case .listening:
             break
