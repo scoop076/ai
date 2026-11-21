@@ -16,7 +16,6 @@ final class Conversation: ObservableObject {
     var statusLine: String {
         switch state {
         case .listening: return hearingYou ? "Hearing you\u{2026}" : "Listening\u{2026}"
-        case .thinking: return youText.isEmpty ? "Got it\u{2026}" : ""
         default: return ""
         }
     }
