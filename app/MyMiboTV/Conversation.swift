@@ -200,15 +200,6 @@ final class Conversation: ObservableObject {
                 show("Going quiet. Say \u{201C}Hey Mibo\u{201D} when you need me.", for: 4)
                 return
             }
-            // While the conversation stays open, Mibo only answers when someone says
-            // its name, so it stays out of other conversations in the room. The first
-            // question right after "Hey Mibo" (or the remote) is always for Mibo.
-            if isFollowUp && !Self.mentionsName(text) {
-                print("My Mibo TV: not for me (no \"Mibo\"): \(text)")
-                endRun(); state = .idle
-                keepListening()
-                return
-            }
             youText = text
             sessionUntil = Date().addingTimeInterval(sessionLength)
             link.event(.intentStart)
@@ -216,12 +207,14 @@ final class Conversation: ObservableObject {
             var pending = "", full = "", started = false
             speaker.begin()
             speaker.onDone = { [weak self] in self?.doneSpeaking(turn: my) }
-            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName), model: "claude-haiku-5-5", device: settings.screenName) {
+            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp), model: "claude-haiku-5-5", device: settings.screenName) {
                 guard my == turn else { return }
                 switch ev {
                 case .persona(let p): setPersona(p)
                 case .text(let t):
                     pending += t; full += t
+                    // Wait until we know it isn't the "[quiet]" signal before speaking.
+                    if Self.mayBeQuietSignal(full) { continue }
                     while case let (chunk, rest)? = Self.nextChunk(pending, first: !started) {
                         pending = rest
                         if !started {
@@ -235,6 +228,14 @@ final class Conversation: ObservableObject {
                 }
             }
             guard my == turn else { return }
+            if Self.isQuietSignal(full) {
+                // Mibo decided this wasn't meant for it: say nothing and keep listening.
+                print("My Mibo TV: not for me: \(text)")
+                youText = ""
+                speaker.stop()
+                endRun(); state = .idle; keepListening()
+                return
+            }
             if !pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if !started {
                     started = true
@@ -331,8 +332,22 @@ final class Conversation: ObservableObject {
     static func isSleepCommand(_ text: String) -> Bool {
         let t = text.lowercased().replacingOccurrences(of: "[^a-z\\s']", with: " ", options: .regularExpression)
             .split(separator: " ").joined(separator: " ")
-        guard !t.isEmpty, t.split(separator: " ").count <= 8 else { return false }
-        return t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|be silent|shut up|stop talking|stop listening|quiet mode|hush|shush)\\b", options: .regularExpression) != nil
+        guard !t.isEmpty else { return false }
+        let words = t.split(separator: " ").count
+        if words <= 10, t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|be silent|shut up|stop talking|stop listening|quiet mode|hush|shush|stop interrupting|stop interjecting|don'?t interrupt|don'?t interject|stay out of (it|this)|leave us alone|not talking to you|i'?m not talking to you|we'?re not talking to you|quiet down|zip it|pipe down)\\b", options: .regularExpression) != nil {
+            return true
+        }
+        // Very short ones: "Mibo, quiet." "Stop." "Enough."
+        return words <= 3 && t.range(of: "\\b(quiet|stop|enough|silence|nevermind|never mind)\\b", options: .regularExpression) != nil
+    }
+
+    /// Claude answers "[quiet]" when what it heard wasn't meant for Mibo.
+    static func isQuietSignal(_ s: String) -> Bool {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("[quiet")
+    }
+    static func mayBeQuietSignal(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t.isEmpty || (t.count < 7 && "[quiet]".hasPrefix(t)) || t.hasPrefix("[quiet")
     }
 
     /// Did Jim say Mibo's name? (Speech-to-text sometimes hears it as Meebo, Mebo, Mabel and so on.)
@@ -347,7 +362,7 @@ final class Conversation: ObservableObject {
         return ["", "you", "thank you", "thanks for watching", "bye", "uh", "um", "hmm", "mibo", "collinsville"].contains(t)
     }
 
-    static func rules(screen: String) -> String {
+    static func rules(screen: String, justWoken: Bool = false) -> String {
         let f = DateFormatter()
         f.dateFormat = "EEEE, MMMM d, yyyy, h:mm a"
         return [
@@ -358,11 +373,14 @@ final class Conversation: ObservableObject {
             "Never use lists, markdown, emoji, symbols, or web addresses. Write numbers and abbreviations the way you would say them.",
             "You can search the web for current or specific information.",
             "When it fits naturally, you may end with a short question to keep the conversation going.",
+            "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
             "Apologize only when a real mistake truly calls for it, once and briefly, then move on. Once something is corrected, don't restate or re-correct it or remind Jim of past mistakes unless he asks or it affects what he's doing now.",
             "The current date and time is \(f.string(from: Date())).",
             "Jim is talking to you right now from the screen he calls \"\(screen)\", which is an Apple TV. He talks to you through the Mibo Voice speaker in the room, and you appear and speak on the TV. The frame can run on several of his screens around the house and on his phone. Use this naturally when it matters, for example if he asks where you are or which screen he's on, but don't announce it otherwise.",
-        ].joined(separator: " ")
+        ].joined(separator: " ") + (justWoken
+            ? " Jim just said \"Hey Mibo\", so this message is for you: answer it (never reply [quiet] to it)."
+            : "")
     }
 }
 
