@@ -369,6 +369,7 @@ struct VoiceDetector {
     private var quietTime = 0.0
     private var heardTime = 0.0
     private var talkTime = 0.0
+    private var voicePeak = 0.0       // how loud Jim's own voice is this turn
     private(set) var peak = 0.0
     private(set) var lastLevel = 0.0
     var background: Double { max(0, floor) }
@@ -401,8 +402,12 @@ struct VoiceDetector {
             return heardTime > waitForSpeech ? .nothingSaid : .waiting
         }
         talkTime += dt
-        quietTime = rms > threshold * 0.6 ? 0 : quietTime + dt
-        if quietTime > 0.8 || talkTime > 30 { return .speechEnded }   // a 0.8 s pause ends your turn
+        // Jim is the loud, close voice. Quieter talk in the room (other people, the TV)
+        // shouldn't keep his turn open, so "quiet" is measured against his own loudness.
+        voicePeak = max(voicePeak * 0.995, rms)
+        let stillTalking = max(threshold * 0.6, voicePeak * 0.15)
+        quietTime = rms > stillTalking ? 0 : quietTime + dt
+        if quietTime > 0.8 || talkTime > 15 { return .speechEnded }   // a 0.8 s pause ends your turn
         return .waiting
     }
 
