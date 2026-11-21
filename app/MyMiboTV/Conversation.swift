@@ -166,9 +166,10 @@ final class Conversation: ObservableObject {
         case .stop:
             // "Hey Mibo" or "stop" while Mibo was thinking or talking: Mibo stops and
             // stays stopped, listening (inside a conversation). While listening it just cancels.
-            let interrupted = state == .speaking || state == .thinking
+            // Inside a conversation Mibo keeps listening either way (before, "Hey Mibo" said
+            // while Mibo was already listening cancelled the listen and nothing reopened it).
             cancelTurn()
-            if interrupted { keepListening() }
+            keepListening()
         case .audio(let d, let raw):
             heard(d, raw: raw)
         }
@@ -428,7 +429,7 @@ final class Conversation: ObservableObject {
         case .eager(let heard):
             let text = wasInterrupted ? Self.dropOwnLead(heard, interruptedReply) : heard
             // Jim has probably finished: start Mibo's answer now, but hold it.
-            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text),
+            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text), !Self.isJustTheName(text),
                   !(wasInterrupted && Self.isOwnWords(text, interruptedReply)) else { return }
             if let early, Self.sameWords(early.text, text) { return }
             early?.cancel()
@@ -441,6 +442,17 @@ final class Conversation: ObservableObject {
         case .endOfTurn(let text):
             // Only once Jim himself has spoken this turn (Flux also hears other people).
             guard hearingYou else { return }
+            if Self.isJustTheName(text) {
+                // Just "Hey Mibo" and a pause: Jim is about to ask something. Keep this turn
+                // open (Flux hears the rest as its next turn) instead of ending it.
+                print("My Mibo TV: just my name; still listening")
+                early?.cancel(); early = nil
+                vad = VoiceDetector(waitForSpeech: 20)
+                recording = Data(); jimRawLevels = []
+                hearingYou = false
+                localEnded = false
+                return
+            }
             print("My Mibo TV: you finished talking (live words): \(text)")
             link?.event(.vadEnd)
             finishedTalking(words: text)
@@ -497,6 +509,13 @@ final class Conversation: ObservableObject {
         let h = words(heard), r = Set(words(reply))
         guard !h.isEmpty, !r.isEmpty else { return false }
         return Double(h.filter { r.contains($0) }.count) / Double(h.count) >= 0.8
+    }
+
+    /// Only Mibo's name ("Hey Mibo", "Mibo?", "Hi Meebo"...), nothing else.
+    static func isJustTheName(_ text: String) -> Bool {
+        let t = text.lowercased().replacingOccurrences(of: "[^a-z ]", with: " ", options: .regularExpression)
+            .split(separator: " ").filter { !["hey", "hi", "ok", "okay", "hello", "yo"].contains($0) }
+        return !t.isEmpty && t.count <= 2 && mentionsName(t.joined(separator: " "))
     }
 
     static func sameWords(_ a: String, _ b: String) -> Bool {
