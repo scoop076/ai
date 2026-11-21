@@ -8,6 +8,18 @@ final class Conversation: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var youText = ""
+    /// How loud Jim is right now (0...1), for the face's listening rings.
+    @Published private(set) var micLevel = 0.0
+    /// True once Mibo has noticed Jim talking in this turn.
+    @Published private(set) var hearingYou = false
+    /// A short line under the face so Jim can tell what Mibo is doing.
+    var statusLine: String {
+        switch state {
+        case .listening: return hearingYou ? "Hearing you\u{2026}" : "Listening\u{2026}"
+        case .thinking: return youText.isEmpty ? "Got it\u{2026}" : ""
+        default: return ""
+        }
+    }
     @Published private(set) var note = ""            // short status line, e.g. "Mibo Voice connected"
     @Published private(set) var speakerConnected = false
     @Published private(set) var accessory: String?   // the current personality's accessory
@@ -129,6 +141,8 @@ final class Conversation: ObservableObject {
         vad = VoiceDetector(waitForSpeech: 20)   // seconds to start talking, after "Hey Mibo" or a reply
         recording = Data()
         youText = ""
+        hearingYou = false
+        micLevel = 0
         link.acceptStart()
         link.event(.runStart)
         link.event(.sttStart)
@@ -138,9 +152,12 @@ final class Conversation: ObservableObject {
     private func heard(_ pcm: Data) {
         guard state == .listening else { return }
         recording.append(pcm)
+        let level = min(1, vad.lastLevel / 6000)
+        micLevel = micLevel * 0.5 + level * 0.5
         switch vad.feed(pcm) {
         case .waiting: break
         case .speechStarted:
+            hearingYou = true
             sessionUntil = Date().addingTimeInterval(sessionLength)
             link?.event(.vadStart)
         case .speechEnded:
@@ -167,6 +184,7 @@ final class Conversation: ObservableObject {
 
     private func finishedTalking() {
         state = .thinking
+        micLevel = 0
         let wav = VoiceDetector.wav(recording)
         recording = Data()
         let my = turn
@@ -352,6 +370,7 @@ struct VoiceDetector {
     private var heardTime = 0.0
     private var talkTime = 0.0
     private(set) var peak = 0.0
+    private(set) var lastLevel = 0.0
     var background: Double { max(0, floor) }
 
     init(waitForSpeech: Double = 7) { self.waitForSpeech = waitForSpeech }
@@ -367,6 +386,7 @@ struct VoiceDetector {
             }
         }
         let rms = (sum / Double(n)).squareRoot()
+        lastLevel = max(0, rms - max(0, floor))
         let dt = Double(n) / 16000
         heardTime += dt
         peak = max(peak, rms)

@@ -51,6 +51,11 @@ struct ContentView: View {
     /// What you said, and the sentence Mibo is saying with its words lighting up as they're spoken.
     private var captions: some View {
         VStack(spacing: 14) {
+            if !convo.statusLine.isEmpty {
+                Text(convo.statusLine)
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(Mibo.eye.opacity(0.6))
+            }
             if !convo.youText.isEmpty && convo.state != .idle {
                 Text(convo.youText)
                     .font(.system(size: 34, weight: .regular))
