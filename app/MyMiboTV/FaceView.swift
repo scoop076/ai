@@ -40,6 +40,10 @@ final class FaceMotion {
     private var mouth = 0.0, listenAmt = 0.0, thinkAmt = 0.0
     private var accAmt = 0.0, acc: String?
     private var lid = 1.0
+    // The TV plays sound a little after the Apple TV sends it, so the mouth follows the
+    // loudness from a moment ago to line up with what you hear.
+    private var levels: [(t: Double, level: Double)] = []
+    private let mouthDelay = 0.15
 
     private func ease(_ cur: Double, _ target: Double, _ rate: Double, _ dt: Double) -> Double {
         cur + (target - cur) * (1 - exp(-rate * dt))
@@ -64,6 +68,10 @@ final class FaceMotion {
         if t > nextBlink { blinkAt = t; nextBlink = t + (Double.random(in: 0...1) < 0.18 ? 0.35 : 2.4 + Double.random(in: 0...4)) }
         let bp = t - blinkAt
         lid = bp >= 0 && bp < 0.16 ? max(0.06, 1 - sin(.pi * bp / 0.16)) : 1
+
+        levels.append((t, level))
+        while levels.count > 1 && levels[1].t <= t - mouthDelay { levels.removeFirst() }
+        let level = levels.first?.level ?? level
 
         let target: Double
         if level >= 0 && speaking { target = level }

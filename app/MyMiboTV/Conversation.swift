@@ -38,12 +38,13 @@ final class Conversation: ObservableObject {
     }
 
     func apply(_ s: TVSettings) {
+        let hostChanged = s.voiceHost != settings.voiceHost
         settings = s
         s.save()
         needsSetup = s.clientID.isEmpty || s.clientSecret.isEmpty
         server = needsSetup ? nil : MiboServer(clientID: s.clientID, clientSecret: s.clientSecret)
         speaker.server = server
-        if let link { link.change(host: s.voiceHost) } else {
+        if let link { if hostChanged { link.change(host: s.voiceHost) } } else {
             let l = ESPHomeLink(host: s.voiceHost)
             l.onEvent = { [weak self] e in MainActor.assumeIsolated { self?.linkEvent(e) } }
             link = l

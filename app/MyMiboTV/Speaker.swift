@@ -73,8 +73,9 @@ final class Speaker: NSObject, ObservableObject {
     }
 
     /// Loudness of the voice right now (0...1), or -1 when unknown, for the mouth.
+    /// While the next sentence's audio is still on its way, this is 0, so the mouth stays still.
     var level: Double {
-        guard let p = player, p.isPlaying else { return isSpeaking ? -1 : 0 }
+        guard let p = player, p.isPlaying else { return synth.isSpeaking ? -1 : 0 }
         p.updateMeters()
         let db = Double(p.averagePower(forChannel: 0))
         return min(1, max(0, pow(10, db / 20) * 4))
