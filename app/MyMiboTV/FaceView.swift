@@ -10,10 +10,10 @@ struct FaceView: View {
     var body: some View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
-            let state = convo.state, level = speaker.level, speaking = speaker.isSpeaking, acc = convo.accessory
+            let state = convo.state, level = speaker.level, speaking = speaker.isSpeaking, acc = convo.accessory, mic = convo.micLevel
             let face = self.face
             Canvas { ctx, size in
-                face.step(t: t, state: state, level: level, speaking: speaking)
+                face.step(t: t, state: state, level: level, speaking: speaking, mic: mic)
                 face.draw(&ctx, size: size, t: t, accessory: acc)
             }
         }
@@ -40,12 +40,17 @@ final class FaceMotion {
     private var mouth = 0.0, listenAmt = 0.0, thinkAmt = 0.0
     private var accAmt = 0.0, acc: String?
     private var lid = 1.0
+    private var micAmt = 0.0
+    // The TV plays sound a little after the Apple TV sends it, so the mouth follows the
+    // loudness from a moment ago to line up with what you hear.
+    private var levels: [(t: Double, level: Double)] = []
+    private let mouthDelay = 0.15
 
     private func ease(_ cur: Double, _ target: Double, _ rate: Double, _ dt: Double) -> Double {
         cur + (target - cur) * (1 - exp(-rate * dt))
     }
 
-    func step(t: Double, state: Conversation.State, level: Double, speaking: Bool) {
+    func step(t: Double, state: Conversation.State, level: Double, speaking: Bool, mic: Double = 0) {
         let dt = last == 0 ? 0.016 : min(0.05, t - last)
         last = t
         switch state {
@@ -65,12 +70,17 @@ final class FaceMotion {
         let bp = t - blinkAt
         lid = bp >= 0 && bp < 0.16 ? max(0.06, 1 - sin(.pi * bp / 0.16)) : 1
 
+        levels.append((t, level))
+        while levels.count > 1 && levels[1].t <= t - mouthDelay { levels.removeFirst() }
+        let level = levels.first?.level ?? level
+
         let target: Double
         if level >= 0 && speaking { target = level }
         else if speaking { target = min(1, 0.22 + 0.42 * (0.5 + 0.5 * sin(t * 11.7)) * (0.55 + 0.45 * sin(t * 3.9 + 1.3))) }
         else { target = 0 }
         mouth = ease(mouth, target, level >= 0 ? 28 : 18, dt)
         listenAmt = ease(listenAmt, state == .listening ? 1 : 0, 6, dt)
+        micAmt = ease(micAmt, state == .listening ? mic : 0, 18, dt)
         thinkAmt = ease(thinkAmt, state == .thinking ? 1 : 0, 6, dt)
     }
 
@@ -97,6 +107,12 @@ final class FaceMotion {
                 let r = R * (1.12 + 0.35 * p)
                 ctx.stroke(Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)),
                            with: .color(Mibo.listen.opacity(listenAmt * 0.55 * (1 - p))), lineWidth: 4)
+            }
+            // A ring that swells with Jim's voice, so he can see Mibo hearing him.
+            if micAmt > 0.02 {
+                let r = R * (1.08 + 0.3 * micAmt)
+                ctx.stroke(Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)),
+                           with: .color(Mibo.listen.opacity(min(1, 0.35 + micAmt))), lineWidth: 6 + 10 * micAmt)
             }
         }
 

@@ -58,6 +58,12 @@ struct ContentView: View {
                     .lineLimit(2)
                     .truncationMode(.head)
             }
+            if convo.showWakeHint && speaker.line.isEmpty {
+                Text("Say \u{201C}Hey Mibo\u{201D}")
+                    .font(.system(size: 40, weight: .medium))
+                    .foregroundStyle(Mibo.eye.opacity(0.6))
+                    .transition(.opacity)
+            }
             if !speaker.line.isEmpty {
                 karaoke(speaker.line, said: speaker.wordsSaid)
                     .font(.system(size: 46, weight: .semibold))
@@ -66,6 +72,7 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.4), value: convo.showWakeHint)
     }
 
     private func karaoke(_ line: String, said: Int) -> Text {
@@ -119,18 +126,36 @@ struct SettingsView: View {
                     Text("Mibo uses this to know which room you're in.")
                 }
                 Section {
-                    Button("Save") {
-                        s.clientID = s.clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-                        s.clientSecret = s.clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
-                        s.voiceHost = s.voiceHost.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if s.voiceHost.isEmpty { s.voiceHost = "mibo-voice.local" }
-                        convo.apply(s)
+                    Button {
+                        save()
                         dismiss()
+                    } label: {
+                        Text("Save and close")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
                     }
+                } footer: {
+                    Text("The Back button on the remote saves too.")
                 }
             }
             .navigationTitle("My Mibo")
         }
-        .onAppear { s = convo.currentSettings }
+        .onAppear { s = convo.currentSettings; loaded = true }
+        .onDisappear { save() }
+    }
+
+    @State private var loaded = false
+
+    /// Saves only what changed, so closing Settings doesn't reconnect for nothing.
+    private func save() {
+        guard loaded else { return }
+        s.clientID = s.clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.clientSecret = s.clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.voiceHost = s.voiceHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.voiceHost.isEmpty { s.voiceHost = "mibo-voice.local" }
+        let old = convo.currentSettings
+        if s.clientID != old.clientID || s.clientSecret != old.clientSecret || s.voiceHost != old.voiceHost || s.screenName != old.screenName {
+            convo.apply(s)
+        }
     }
 }

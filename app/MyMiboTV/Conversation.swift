@@ -8,6 +8,10 @@ final class Conversation: ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var youText = ""
+    /// How loud Jim is right now (0...1), for the face's listening rings.
+    @Published private(set) var micLevel = 0.0
+    /// True once Mibo has noticed Jim talking in this turn.
+    @Published private(set) var hearingYou = false
     @Published private(set) var note = ""            // short status line, e.g. "Mibo Voice connected"
     @Published private(set) var speakerConnected = false
     @Published private(set) var accessory: String?   // the current personality's accessory
@@ -28,6 +32,13 @@ final class Conversation: ObservableObject {
     private var recording = Data()
     private var isFollowUp = false
     private var expectingFollowUp = false
+    /// A conversation stays open (Mibo keeps listening) until Jim says "go quiet",
+    /// or until nobody has talked for this long.
+    @Published private var sessionUntil: Date?
+    private let sessionLength: TimeInterval = 5 * 60
+    private var inSession: Bool { (sessionUntil ?? .distantPast) > Date() }
+    /// Quiet mode: show the "Say Hey Mibo" hint on the TV.
+    var showWakeHint: Bool { state == .idle && sessionUntil == nil && speakerConnected && !needsSetup }
     private var turn = 0
     private var replyTask: Task<Void, Never>?
     private var noteClear: DispatchWorkItem?
@@ -38,12 +49,13 @@ final class Conversation: ObservableObject {
     }
 
     func apply(_ s: TVSettings) {
+        let hostChanged = s.voiceHost != settings.voiceHost
         settings = s
         s.save()
         needsSetup = s.clientID.isEmpty || s.clientSecret.isEmpty
         server = needsSetup ? nil : MiboServer(clientID: s.clientID, clientSecret: s.clientSecret)
         speaker.server = server
-        if let link { link.change(host: s.voiceHost) } else {
+        if let link { if hostChanged { link.change(host: s.voiceHost) } } else {
             let l = ESPHomeLink(host: s.voiceHost)
             l.onEvent = { [weak self] e in MainActor.assumeIsolated { self?.linkEvent(e) } }
             link = l
@@ -117,9 +129,12 @@ final class Conversation: ObservableObject {
         turn += 1
         isFollowUp = expectingFollowUp
         expectingFollowUp = false
-        vad = VoiceDetector(waitForSpeech: isFollowUp ? 5 : 7)
+        if !isFollowUp { sessionUntil = Date().addingTimeInterval(sessionLength) }   // "Hey Mibo" opens a conversation
+        vad = VoiceDetector(waitForSpeech: 20)   // seconds to start talking, after "Hey Mibo" or a reply
         recording = Data()
         youText = ""
+        hearingYou = false
+        micLevel = 0
         link.acceptStart()
         link.event(.runStart)
         link.event(.sttStart)
@@ -129,15 +144,30 @@ final class Conversation: ObservableObject {
     private func heard(_ pcm: Data) {
         guard state == .listening else { return }
         recording.append(pcm)
+        let level = min(1, vad.lastLevel / 6000)
+        micLevel = micLevel * 0.5 + level * 0.5
         switch vad.feed(pcm) {
         case .waiting: break
-        case .speechStarted: link?.event(.vadStart)
+        case .speechStarted:
+            hearingYou = true
+            link?.event(.vadStart)
         case .speechEnded:
             print("My Mibo TV: you finished talking (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
             link?.event(.vadEnd); finishedTalking()
         case .nothingSaid:
             print("My Mibo TV: heard nothing (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
             endRun(); state = .idle
+            keepListening()
+        }
+    }
+
+    /// Still in a conversation: open the mic again so Jim doesn't need "Hey Mibo".
+    private func keepListening() {
+        guard inSession else { sessionUntil = nil; return }
+        expectingFollowUp = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard self.state == .idle, self.inSession else { self.expectingFollowUp = false; return }
+            if self.link?.listenAgain() != true { self.expectingFollowUp = false }
         }
     }
 
@@ -145,6 +175,7 @@ final class Conversation: ObservableObject {
 
     private func finishedTalking() {
         state = .thinking
+        micLevel = 0
         let wav = VoiceDetector.wav(recording)
         recording = Data()
         let my = turn
@@ -159,25 +190,31 @@ final class Conversation: ObservableObject {
             link.event(.sttEnd, [("text", text)])
             if text.isEmpty || Self.isNoise(text) {
                 endRun(); state = .idle
+                keepListening()
                 return
             }
-            youText = text
             if Self.isSleepCommand(text) {
+                youText = text
+                sessionUntil = nil
                 endRun(); state = .idle
                 show("Going quiet. Say \u{201C}Hey Mibo\u{201D} when you need me.", for: 4)
                 return
             }
+            youText = text
+            sessionUntil = Date().addingTimeInterval(sessionLength)
             link.event(.intentStart)
 
             var pending = "", full = "", started = false
             speaker.begin()
             speaker.onDone = { [weak self] in self?.doneSpeaking(turn: my) }
-            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName), model: "claude-haiku-5-5", device: settings.screenName) {
+            for try await ev in server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp), model: "claude-haiku-5-5", device: settings.screenName) {
                 guard my == turn else { return }
                 switch ev {
                 case .persona(let p): setPersona(p)
                 case .text(let t):
                     pending += t; full += t
+                    // Wait until we know it isn't the "[quiet]" signal before speaking.
+                    if Self.mayBeQuietSignal(full) { continue }
                     while case let (chunk, rest)? = Self.nextChunk(pending, first: !started) {
                         pending = rest
                         if !started {
@@ -191,6 +228,14 @@ final class Conversation: ObservableObject {
                 }
             }
             guard my == turn else { return }
+            if Self.isQuietSignal(full) {
+                // Mibo decided this wasn't meant for it: say nothing and keep listening.
+                print("My Mibo TV: not for me: \(text)")
+                youText = ""
+                speaker.stop()
+                endRun(); state = .idle; keepListening()
+                return
+            }
             if !pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if !started {
                     started = true
@@ -200,11 +245,12 @@ final class Conversation: ObservableObject {
                 }
                 speaker.add(pending)
             }
-            if !started { endRun(); state = .idle; return }
+            if !started { endRun(); state = .idle; keepListening(); return }
             speaker.finishQueue()
         } catch {
             guard my == turn, !(error is CancellationError) else { return }
             speaker.stop()
+            sessionUntil = nil
             link.event(.error, [("code", "mibo-error"), ("message", String(error.localizedDescription.prefix(120)))])
             endRun()
             state = .idle
@@ -216,12 +262,7 @@ final class Conversation: ObservableObject {
         guard my == turn, state == .speaking else { return }
         endRun()
         state = .idle
-        // Keep the conversation going: open the mic again for a follow-up.
-        expectingFollowUp = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            guard self.state == .idle else { return }
-            if self.link?.listenAgain() != true { self.expectingFollowUp = false }
-        }
+        keepListening()
     }
 
     private func endRun() { link?.event(.runEnd) }
@@ -245,13 +286,17 @@ final class Conversation: ObservableObject {
             guard speakerConnected else { show("The Mibo Voice speaker isn't connected yet.", for: 4); return }
             _ = link?.listenAgain()
         case .speaking, .thinking:
+            sessionUntil = nil
             cancelTurn()
         case .listening:
             break
         }
     }
 
-    func remoteStop() { if state != .idle { cancelTurn() } }
+    func remoteStop() {
+        sessionUntil = nil
+        if state != .idle { cancelTurn() }
+    }
 
     // MARK: Helpers
 
@@ -287,17 +332,40 @@ final class Conversation: ObservableObject {
     static func isSleepCommand(_ text: String) -> Bool {
         let t = text.lowercased().replacingOccurrences(of: "[^a-z\\s']", with: " ", options: .regularExpression)
             .split(separator: " ").joined(separator: " ")
-        guard !t.isEmpty, t.split(separator: " ").count <= 6 else { return false }
-        return t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|stop listening|quiet mode|hush|shush)\\b", options: .regularExpression) != nil
+        guard !t.isEmpty else { return false }
+        let words = t.split(separator: " ").count
+        if words <= 10, t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|be silent|shut up|stop talking|stop listening|quiet mode|hush|shush|stop interrupting|stop interjecting|don'?t interrupt|don'?t interject|stay out of (it|this)|leave us alone|not talking to you|i'?m not talking to you|we'?re not talking to you|quiet down|zip it|pipe down)\\b", options: .regularExpression) != nil {
+            return true
+        }
+        // Very short ones: "Mibo, quiet." "Stop." "Enough."
+        return words <= 3 && t.range(of: "\\b(quiet|stop|enough|silence|nevermind|never mind)\\b", options: .regularExpression) != nil
+    }
+
+    /// Claude answers "[quiet]" when what it heard wasn't meant for Mibo.
+    static func isQuietSignal(_ s: String) -> Bool {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("[quiet")
+    }
+    static func mayBeQuietSignal(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t.isEmpty || (t.count < 7 && "[quiet]".hasPrefix(t)) || t.hasPrefix("[quiet")
+    }
+
+    /// Did Jim say Mibo's name? (Speech-to-text sometimes hears it as Meebo, Mebo, Mabel and so on.)
+    static func mentionsName(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return t.range(of: "\\b(mibo|meebo|mebo|miebo|mibbo|nibo|neebo|mybo|me bo|mi bo|mee bo|mabel|mable|maybel|mibel|mi-bo)\\b", options: .regularExpression) != nil
     }
 
     /// Whisper sometimes "hears" these in silence or TV noise.
     static func isNoise(_ text: String) -> Bool {
-        let t = text.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
-        return ["", "you", "thank you", "thanks for watching", "bye", "uh", "um", "hmm", "mibo", "collinsville"].contains(t)
+        let t = text.lowercased()
+            .replacingOccurrences(of: "[^a-z' ]", with: " ", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+        return ["", "you", "thank you", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm",
+                "mibo", "collinsville", "mibo collinsville", "meebo", "hey mibo"].contains(t)
     }
 
-    static func rules(screen: String) -> String {
+    static func rules(screen: String, justWoken: Bool = false) -> String {
         let f = DateFormatter()
         f.dateFormat = "EEEE, MMMM d, yyyy, h:mm a"
         return [
@@ -308,11 +376,14 @@ final class Conversation: ObservableObject {
             "Never use lists, markdown, emoji, symbols, or web addresses. Write numbers and abbreviations the way you would say them.",
             "You can search the web for current or specific information.",
             "When it fits naturally, you may end with a short question to keep the conversation going.",
+            "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
             "Apologize only when a real mistake truly calls for it, once and briefly, then move on. Once something is corrected, don't restate or re-correct it or remind Jim of past mistakes unless he asks or it affects what he's doing now.",
             "The current date and time is \(f.string(from: Date())).",
             "Jim is talking to you right now from the screen he calls \"\(screen)\", which is an Apple TV. He talks to you through the Mibo Voice speaker in the room, and you appear and speak on the TV. The frame can run on several of his screens around the house and on his phone. Use this naturally when it matters, for example if he asks where you are or which screen he's on, but don't announce it otherwise.",
-        ].joined(separator: " ")
+        ].joined(separator: " ") + (justWoken
+            ? " Jim just said \"Hey Mibo\", so this message is for you: answer it (never reply [quiet] to it)."
+            : "")
     }
 }
 
@@ -327,7 +398,9 @@ struct VoiceDetector {
     private var quietTime = 0.0
     private var heardTime = 0.0
     private var talkTime = 0.0
+    private var voicePeak = 0.0       // how loud Jim's own voice is this turn
     private(set) var peak = 0.0
+    private(set) var lastLevel = 0.0
     var background: Double { max(0, floor) }
 
     init(waitForSpeech: Double = 7) { self.waitForSpeech = waitForSpeech }
@@ -343,6 +416,7 @@ struct VoiceDetector {
             }
         }
         let rms = (sum / Double(n)).squareRoot()
+        lastLevel = max(0, rms - max(0, floor))
         let dt = Double(n) / 16000
         heardTime += dt
         peak = max(peak, rms)
@@ -357,8 +431,12 @@ struct VoiceDetector {
             return heardTime > waitForSpeech ? .nothingSaid : .waiting
         }
         talkTime += dt
-        quietTime = rms > threshold * 0.6 ? 0 : quietTime + dt
-        if quietTime > 0.8 || talkTime > 15 { return .speechEnded }
+        // Jim is the loud, close voice. Quieter talk in the room (other people, the TV)
+        // shouldn't keep his turn open, so "quiet" is measured against his own loudness.
+        voicePeak = max(voicePeak * 0.995, rms)
+        let stillTalking = max(threshold * 0.6, voicePeak * 0.15)
+        quietTime = rms > stillTalking ? 0 : quietTime + dt
+        if quietTime > 0.8 || talkTime > 15 { return .speechEnded }   // a 0.8 s pause ends your turn
         return .waiting
     }
 
