@@ -381,8 +381,8 @@ struct VoiceDetector {
             return heardTime > waitForSpeech ? .nothingSaid : .waiting
         }
         talkTime += dt
-        quietTime = rms > threshold * 0.5 ? 0 : quietTime + dt
-        if quietTime > 1.5 || talkTime > 30 { return .speechEnded }   // a 1.5 s pause ends your turn
+        quietTime = rms > threshold * 0.6 ? 0 : quietTime + dt
+        if quietTime > 0.8 || talkTime > 30 { return .speechEnded }   // a 0.8 s pause ends your turn
         return .waiting
     }
 
