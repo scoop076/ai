@@ -25,6 +25,9 @@ final class Speaker: NSObject, ObservableObject {
     private var playing = false
     private var generation = 0
     private var ticker: Timer?
+    // Short cues like "Yes?", fetched ahead of time so they play instantly.
+    private var cueAudio: [String: Data] = [:]
+    private var cuePlayer: AVAudioPlayer?
 
     override init() {
         super.init()
@@ -79,6 +82,33 @@ final class Speaker: NSObject, ObservableObject {
         p.updateMeters()
         let db = Double(p.averagePower(forChannel: 0))
         return min(1, max(0, pow(10, db / 20) * 4))
+    }
+
+    // MARK: Cues
+
+    /// Fetch a short cue in the current voice ahead of time.
+    func prepareCue(_ text: String) {
+        let key = voice + "|" + text
+        guard cueAudio[key] == nil, let server else { return }
+        let v = voice
+        Task {
+            if let d = try? await server.speech(Self.forVoice(text), voice: v) { self.cueAudio[key] = d }
+        }
+    }
+
+    /// Say a short cue right now, outside the reply queue.
+    func cue(_ text: String) {
+        if let d = cueAudio[voice + "|" + text], let p = try? AVAudioPlayer(data: d, fileTypeHint: AVFileType.mp3.rawValue) {
+            p.enableRate = true
+            p.rate = rate
+            cuePlayer = p
+            p.play()
+        } else {
+            let u = AVSpeechUtterance(string: Self.forVoice(text))
+            u.rate = AVSpeechUtteranceDefaultSpeechRate * min(1.3, max(0.7, rate))
+            synth.speak(u)
+            prepareCue(text)
+        }
     }
 
     // MARK: -

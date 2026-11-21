@@ -62,6 +62,8 @@ final class Conversation: ObservableObject {
     private var spokenSoFar = ""            // the reply Mibo is saying now
     private var roomFloor = 500.0
     private var ignoreAudioUntil = Date.distantPast
+    private var connectedAt = Date.distantPast
+    private var saidYesAt = Date.distantPast      // when Mibo last said "Yes?" 
 
     // Live words (Deepgram Flux): Jim's speech is turned into words while he talks, and
     // Flux decides when he's finished, so Mibo can answer sooner. Whisper is the backup.
@@ -146,6 +148,7 @@ final class Conversation: ObservableObject {
     private func setPersona(_ id: String) {
         persona = id
         speaker.voice = id == "claude" ? defaultVoice : (personaVoices[id] ?? defaultVoice)
+        speaker.prepareCue("Yes?")
         accessory = id == "claude" ? nil : personaLooks[id]
     }
 
@@ -155,6 +158,7 @@ final class Conversation: ObservableObject {
         switch e {
         case .connected(let name):
             speakerConnected = true
+            connectedAt = Date()
             show("Connected to \(name). Say \u{201C}Hey Mibo.\u{201D}", for: 5)
         case .disconnected:
             speakerConnected = false
@@ -200,6 +204,22 @@ final class Conversation: ObservableObject {
         link.event(.sttStart)
         state = .listening
         startFlux()
+        // "Hey Mibo" just opened the app: Mibo answers "Yes?" so Jim knows to go ahead.
+        if !isFollowUp && Date().timeIntervalSince(connectedAt) < 15 { sayYes() }
+    }
+
+    /// Mibo's "Yes?" when Jim says only its name (it replaces the speaker's chime).
+    private func sayYes() {
+        guard Date().timeIntervalSince(saidYesAt) > 4 else { return }   // never twice in a row
+        saidYesAt = Date()
+        speaker.cue("Yes?")
+    }
+
+    /// The speaker also hears Mibo's own "Yes?" from the TV: drop it from the start of Jim's words.
+    private func withoutOwnYes(_ text: String) -> String {
+        guard Date().timeIntervalSince(saidYesAt) < 6 else { return text }
+        let r = text.replacingOccurrences(of: "^\\s*(yes|yeah|yep)[.?!,]*\\s*", with: "", options: [.regularExpression, .caseInsensitive])
+        return r
     }
 
     private func heard(_ pcm: Data, raw: Data? = nil) {
@@ -426,7 +446,8 @@ final class Conversation: ObservableObject {
         switch e {
         case .update:
             break
-        case .eager(let heard):
+        case .eager(let heard0):
+            let heard = withoutOwnYes(heard0)
             let text = wasInterrupted ? Self.dropOwnLead(heard, interruptedReply) : heard
             // Jim has probably finished: start Mibo's answer now, but hold it.
             guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text), !Self.isJustTheName(text),
@@ -439,13 +460,17 @@ final class Conversation: ObservableObject {
             })
         case .resumed:
             early?.cancel(); early = nil
-        case .endOfTurn(let text):
+        case .endOfTurn(let heardText):
+            let text0 = heardText
             // Only once Jim himself has spoken this turn (Flux also hears other people).
             guard hearingYou else { return }
-            if Self.isJustTheName(text) {
-                // Just "Hey Mibo" and a pause: Jim is about to ask something. Keep this turn
-                // open (Flux hears the rest as its next turn) instead of ending it.
+            let ownYes = text0 != withoutOwnYes(text0) && withoutOwnYes(text0).isEmpty
+            let text = withoutOwnYes(text0)
+            if Self.isJustTheName(text) || ownYes {
+                // Just "Hey Mibo" and a pause (or Mibo's own "Yes?" coming back): Jim is about to
+                // ask something. Keep this turn open (Flux hears the rest as its next turn).
                 print("My Mibo TV: just my name; still listening")
+                if !ownYes { sayYes() }
                 early?.cancel(); early = nil
                 vad = VoiceDetector(waitForSpeech: 20)
                 recording = Data(); jimRawLevels = []
