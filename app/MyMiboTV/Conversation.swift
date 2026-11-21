@@ -118,7 +118,7 @@ final class Conversation: ObservableObject {
         turn += 1
         isFollowUp = expectingFollowUp
         expectingFollowUp = false
-        vad = VoiceDetector(waitForSpeech: isFollowUp ? 5 : 7)
+        vad = VoiceDetector(waitForSpeech: 8)   // seconds to start talking, after "Hey Mibo" or a reply
         recording = Data()
         youText = ""
         link.acceptStart()
@@ -358,8 +358,8 @@ struct VoiceDetector {
             return heardTime > waitForSpeech ? .nothingSaid : .waiting
         }
         talkTime += dt
-        quietTime = rms > threshold * 0.6 ? 0 : quietTime + dt
-        if quietTime > 0.8 || talkTime > 15 { return .speechEnded }
+        quietTime = rms > threshold * 0.5 ? 0 : quietTime + dt
+        if quietTime > 1.5 || talkTime > 30 { return .speechEnded }   // a 1.5 s pause ends your turn
         return .waiting
     }
 
