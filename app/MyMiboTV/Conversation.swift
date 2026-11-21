@@ -95,6 +95,11 @@ final class Conversation: ObservableObject {
 
     init() {
         speaker.onDone = nil
+        // Start in the voice Mibo had last time, so the first "Yes?" after "Hey Mibo" opens
+        // the app isn't in the default voice while the preferences are still loading.
+        if let v = UserDefaults.standard.string(forKey: "lastVoice") { speaker.voice = v }
+        let r = UserDefaults.standard.float(forKey: "lastRate")
+        if r > 0 { speaker.rate = r }
         apply(settings)
         dozeTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkDoze() }
@@ -105,13 +110,14 @@ final class Conversation: ObservableObject {
     /// Close My Mibo. Let go of the speaker first, so the next "Hey Mibo" knows the app
     /// is closed and asks Home Assistant to open it. (Fine for Jim's own Apple TVs; an App
     /// Store version would need another way, since apps aren't supposed to quit themselves.)
-    /// "Go away": a quick "Bye!", then close the app.
+    /// "Go away": a fun goodbye ("Peace out!", "Gone girl!"...), then close the app.
     private func sayByeAndClose() {
         speaker.stop()
         sessionUntil = nil
         endRun(); state = .idle
-        speaker.cue("Bye!")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.closeApp() }
+        speaker.cue(nextBye)
+        nextBye = Self.goodbyes.filter { $0 != nextBye }.randomElement()!
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in self?.closeApp() }
     }
 
     private func closeApp() {
@@ -174,7 +180,9 @@ final class Conversation: ObservableObject {
                 if let v = prefs["auraVoice"] as? String { defaultVoice = v }
                 if let r = prefs["rate"] as? Double { speaker.rate = Float(min(1.4, max(0.6, r / 1.2))) }
                 setPersona((prefs["persona"] as? String) ?? "claude")
+                UserDefaults.standard.set(speaker.rate, forKey: "lastRate")
             }
+            prefsLoaded = true
         } catch {
             show(error.localizedDescription, for: 8)
         }
@@ -183,8 +191,9 @@ final class Conversation: ObservableObject {
     private func setPersona(_ id: String) {
         persona = id
         speaker.voice = id == "claude" ? defaultVoice : (personaVoices[id] ?? defaultVoice)
+        UserDefaults.standard.set(speaker.voice, forKey: "lastVoice")
         speaker.prepareCue("Yes?")
-        speaker.prepareCue("Bye!")
+        speaker.prepareCue(nextBye)
         accessory = id == "claude" ? nil : personaLooks[id]
     }
 
@@ -248,8 +257,18 @@ final class Conversation: ObservableObject {
     private func sayYes() {
         guard Date().timeIntervalSince(saidYesAt) > 4 else { return }   // never twice in a row
         saidYesAt = Date()
-        speaker.cue("Yes?")
+        // Just after launch, give the preferences (Mibo's voice) up to 2 s to load.
+        Task {
+            for _ in 0..<20 where !self.prefsLoaded { try? await Task.sleep(nanoseconds: 100_000_000) }
+            self.speaker.cue("Yes?")
+        }
     }
+
+    private var prefsLoaded = false
+    /// Mibo's goodbye when Jim says "go away" (a different one each time).
+    static let goodbyes = ["Peace out!", "I'm out!", "Gone girl!", "Later, gator!", "Catch you on the flip side!",
+                           "Smell ya later!", "Mibo out!", "Deuces!", "Toodles!", "Poof!", "Adios!", "Ghosting you now!"]
+    private var nextBye = Conversation.goodbyes.randomElement()!
 
     /// The speaker also hears Mibo's own "Yes?" from the TV: drop it from the start of Jim's words.
     private func withoutOwnYes(_ text: String) -> String {
