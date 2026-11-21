@@ -604,7 +604,7 @@ final class Conversation: ObservableObject {
     /// Did Jim say Mibo's name? (Speech-to-text sometimes hears it as Meebo, Mebo, Mabel and so on.)
     static func mentionsName(_ text: String) -> Bool {
         let t = text.lowercased()
-        return t.range(of: "\\b(mibo|meebo|mebo|miebo|mibbo|nibo|neebo|mybo|me bo|mi bo|mee bo|mabel|mable|maybel|mibel|mi-bo)\\b", options: .regularExpression) != nil
+        return t.range(of: "\\b(miguel|mibo|meebo|mebo|miebo|mibbo|nibo|neebo|mybo|me bo|mi bo|mee bo|mabel|mable|maybel|mibel|mi-bo)\\b", options: .regularExpression) != nil
     }
 
     /// Whisper sometimes "hears" these in silence or TV noise.
@@ -627,6 +627,7 @@ final class Conversation: ObservableObject {
             "Never use lists, markdown, emoji, symbols, or web addresses. Write numbers and abbreviations the way you would say them.",
             "You can search the web for current or specific information.",
             "When it fits naturally, you may end with a short question to keep the conversation going.",
+            "Speech-to-text often mishears your name Mibo as Miguel, Meebo, Mabel or Nibo; treat those as your name.",
             "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
             "Apologize only when a real mistake truly calls for it, once and briefly, then move on. Once something is corrected, don't restate or re-correct it or remind Jim of past mistakes unless he asks or it affects what he's doing now.",
@@ -789,11 +790,12 @@ final class EarlyReply {
 /// hears it as loud room sound; Jim counts only when he's clearly louder than that
 /// (and than a fixed minimum) for about a quarter second.
 struct BargeDetector {
-    /// How many times louder than Mibo's voice Jim has to be.
-    static let ratio = 2.2
-    /// Never interrupt for anything quieter than this (room noise is about 250-2,000;
-    /// Jim's voice about 15,000-23,000).
-    static let minimum = 6000.0
+    /// How many times louder than Mibo's voice Jim has to be. The speaker's audio chip
+    /// evens out loudness (automatic gain), so a yell only measures about 1.5-2.5 times
+    /// Mibo's voice (Nov 21 test: Mibo about 6,400, Jim yelling 12,000-17,000).
+    static let ratio = 1.7
+    /// Never interrupt for anything quieter than this (room noise is about 250-2,000).
+    static let minimum = 9000.0
     static let needTime = 0.25
 
     private let echo: Double             // Mibo's voice level learned from earlier replies
@@ -801,6 +803,7 @@ struct BargeDetector {
     private var audible: [Double] = []   // levels while Mibo's audio was playing
     private var loud = 0.0
     private var logIn = 1.0
+    private var secondPeak = 0.0
     private(set) var lastLevel = 0.0
     private(set) var miboNow = 0.0
     private(set) var needed = 0.0
@@ -823,20 +826,24 @@ struct BargeDetector {
         recent.append(rms)
         let window = Int(3.0 / dt)
         if recent.count > window { recent.removeFirst(recent.count - window) }
-        if miboAudible {
-            audible.append(rms)
+        // Mibo's voice: mostly the level learned from earlier replies. The last few seconds
+        // (their median, leaving out the last half second) only raise it if the TV got
+        // louder, and by at most 40%, so Jim's own yelling can't push the bar out of reach.
+        let lag = Int(0.5 / dt)
+        let windowLevel = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.5) : 0
+        miboNow = max(echo, min(windowLevel, echo * 1.4))
+        needed = max(Self.minimum, Self.ratio * miboNow)
+        loud = rms > needed ? loud + dt : max(0, loud - dt)
+        if miboAudible && rms < needed {
+            audible.append(rms)                    // learn Mibo's level from Mibo, not from Jim
             if audible.count > 6000 { audible.removeFirst(2000) }
         }
-        // Mibo's voice right now: a loud-ish level from the last few seconds, leaving out
-        // the last half second (which may already be Jim).
-        let lag = Int(0.5 / dt)
-        miboNow = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.8) : 0
-        needed = max(Self.minimum, Self.ratio * max(echo, miboNow))
-        loud = rms > needed ? loud + dt : max(0, loud - dt)
+        secondPeak = max(secondPeak, rms)
         logIn -= dt
         if logIn <= 0 {
             logIn = 1
-            print("My Mibo TV: over Mibo: level \(Int(rms)), Mibo's voice \(Int(max(echo, miboNow))), needed \(Int(needed))")
+            print("My Mibo TV: over Mibo: loudest \(Int(secondPeak)), Mibo's voice \(Int(miboNow)), needed \(Int(needed))")
+            secondPeak = 0
         }
         return loud >= Self.needTime
     }
