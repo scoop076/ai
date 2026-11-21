@@ -16,6 +16,12 @@ final class Conversation: ObservableObject {
     @Published private(set) var speakerConnected = false
     @Published private(set) var accessory: String?   // the current personality's accessory
     @Published var needsSetup = false
+    /// Mibo's own screensaver: after a while with nothing going on the screen fades
+    /// almost to black. "Hey Mibo" or a click on the remote wakes it.
+    @Published private(set) var dozing = false
+    private var lastActive = Date()
+    private let dozeAfter: TimeInterval = 10 * 60
+    private var dozeTimer: Timer?
 
     let speaker = Speaker()
     private var link: ESPHomeLink?
@@ -46,6 +52,20 @@ final class Conversation: ObservableObject {
     init() {
         speaker.onDone = nil
         apply(settings)
+        dozeTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkDoze() }
+        }
+    }
+
+    /// Something happened: stay awake (and wake up if dozing).
+    func touch() {
+        lastActive = Date()
+        if dozing { dozing = false }
+    }
+
+    private func checkDoze() {
+        if state != .idle || sessionUntil != nil || speaker.isSpeaking { lastActive = Date(); return }
+        if !dozing && Date().timeIntervalSince(lastActive) > dozeAfter { dozing = true }
     }
 
     func apply(_ s: TVSettings) {
@@ -119,6 +139,7 @@ final class Conversation: ObservableObject {
     }
 
     private func startListening() {
+        touch()
         if state == .speaking || state == .thinking { cancelTurn(endRun: false) }
         guard let link else { return }
         guard server != nil else {
@@ -281,6 +302,8 @@ final class Conversation: ObservableObject {
 
     /// Click on the remote: talk, or stop Mibo talking.
     func remoteTap() {
+        if dozing { touch(); return }   // first click just wakes the screen
+        touch()
         switch state {
         case .idle:
             guard speakerConnected else { show("The Mibo Voice speaker isn't connected yet.", for: 4); return }
@@ -294,6 +317,7 @@ final class Conversation: ObservableObject {
     }
 
     func remoteStop() {
+        touch()
         sessionUntil = nil
         if state != .idle { cancelTurn() }
     }

@@ -132,6 +132,13 @@ form.type button:focus-visible, .sheet button:focus-visible { outline: 2px solid
   text-align: center; z-index: 2; pointer-events: none; white-space: nowrap;
 }
 
+/* Mibo's doze: after a while with nothing going on, the screen fades almost to black. */
+body::after {
+  content: ""; position: fixed; inset: 0; background: #000; opacity: 0;
+  pointer-events: none; z-index: 50; transition: opacity 0.6s ease;
+}
+body.dozing::after { opacity: 0.9; transition: opacity 4s ease; }
+
 .sheet {
   position: absolute; z-index: 4;
   top: calc(env(safe-area-inset-top, 0px) + 64px);
@@ -368,6 +375,16 @@ body.no-captions .captions { visibility: hidden; }
      mute. In a normal browser none of this runs. */
   const APP = (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.frame) || null;
   let nativeLevel = 0, nativeVoices = [], nativeSeq = 0;
+  /* How loud Jim is while Mibo listens (0..1), measured against the room's own background noise,
+     so the ring swells with his voice and stays still for the hum of the room. */
+  let micLevel = 0, micFloor = 0.004, micPeak = 0.02, micAt = 0;
+  function heardMic(rms) {
+    micAt = Date.now();
+    micFloor = rms < micFloor ? micFloor + (rms - micFloor) * 0.2 : micFloor + (rms - micFloor) * 0.004;
+    const over = Math.max(0, rms - micFloor * 1.8);
+    micPeak = Math.max(over, micPeak * 0.997, 0.02);
+    micLevel = Math.min(1, over / micPeak);
+  }
   let kokoro = { status: "off", progress: 0 };   // Mibo's built-in voice in the app
   const playWaiters = {}, sayCbs = {}, listeners = {};
   function toApp(msg) { try { APP.postMessage(msg); } catch {} }
@@ -393,6 +410,7 @@ body.no-captions .captions { visibility: hidden; }
     else if (e.type === "error") { if (r && r.onerror) r.onerror({ error: e.error }); }
     else if (e.type === "end") { if (r) { delete listeners[e.id]; if (r.onend) r.onend(); } }
     else if (e.type === "level") nativeLevel = Number(e.value) || 0;
+    else if (e.type === "mic") heardMic(Number(e.value) || 0);
     else if (e.type === "played") { const f = playWaiters[e.id]; delete playWaiters[e.id]; if (f) f(); }
     else if (e.type === "sayStart") { const c = sayCbs[e.id]; if (c) c.start(); }
     else if (e.type === "boundary") kick = 1;
@@ -434,8 +452,29 @@ body.no-captions .captions { visibility: hidden; }
     if (between) { state = s; return; }   // a split-second pause between listening turns: change nothing on screen
     state = s; statusEl.textContent = STATUS[s]; document.body.classList.toggle("is-listening", s === "listening");
     if (s === "idle") setTimeout(armWake, 400); else disarmWake();
+    if (s !== "idle") wakeScreen();
     reportState();
   }
+
+  /* Doze: after 10 quiet minutes the screen fades almost to black. "Hey Mibo" or a tap wakes it;
+     a tap while dozing only wakes the screen. */
+  const DOZE_AFTER = 10 * 60 * 1000;
+  let lastActive = Date.now();
+  const isDozing = () => document.body.classList.contains("dozing");
+  function wakeScreen() { lastActive = Date.now(); document.body.classList.remove("dozing"); }
+  setInterval(() => {
+    if (state !== "idle" || !sheet.hidden || document.hidden) { lastActive = Date.now(); return; }
+    if (!isDozing() && Date.now() - lastActive > DOZE_AFTER) document.body.classList.add("dozing");
+  }, 15000);
+  let swallowClick = false;
+  document.addEventListener("pointerdown", (e) => {
+    if (isDozing()) { swallowClick = true; e.stopPropagation(); e.preventDefault(); }
+    wakeScreen();
+  }, true);
+  document.addEventListener("click", (e) => {
+    if (swallowClick) { swallowClick = false; e.stopPropagation(); e.preventDefault(); }
+  }, true);
+  document.addEventListener("keydown", wakeScreen, true);
   // Send the captions (Jim's words as he speaks, and Mibo's reply) to the app, so the phone
   // can show them while Mibo is on the TV. Checked a few times a second; sent only when they change.
   let sentYou = null, sentMibo = null;
@@ -1733,7 +1772,7 @@ body.no-captions .captions { visibility: hidden; }
 
   const TAU = Math.PI * 2, motion = reduceMotion ? 0.3 : 1;
   const gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 };
-  let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, thinkAmt = 0, lastT = 0;
+  let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, micAmt = 0, thinkAmt = 0, lastT = 0;
   const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
   function hexRGB(hex) {
     const h = String(hex).replace("#", "");
@@ -1839,6 +1878,8 @@ body.no-captions .captions { visibility: hidden; }
       : 0;
     mouth = ease(mouth, mTarget, level >= 0 ? 28 : 18, dt);
     listenAmt = ease(listenAmt, state === "listening" ? 1 : 0, 6, dt);
+    if (Date.now() - micAt > 300) micLevel = 0;   // no fresh sound from the microphone
+    micAmt = ease(micAmt, state === "listening" ? micLevel : 0, 18, dt);
     thinkAmt = ease(thinkAmt, state === "thinking" ? 1 : 0, 6, dt);
 
     ctx.clearRect(0, 0, W, H);
@@ -1864,6 +1905,12 @@ body.no-captions .captions { visibility: hidden; }
         ctx.strokeStyle = rgba(C.listen, listenAmt * 0.55 * (1 - p));
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, cy, R * (1.12 + 0.35 * p * motion), 0, TAU); ctx.stroke();
+      }
+      // A ring that swells with Jim's voice, so he can see Mibo hearing him and how loud.
+      if (micAmt > 0.02) {
+        ctx.strokeStyle = rgba(C.listen, Math.min(1, 0.35 + micAmt));
+        ctx.lineWidth = Math.max(3, R * (0.03 + 0.05 * micAmt));
+        ctx.beginPath(); ctx.arc(cx, cy, R * (1.08 + 0.3 * micAmt), 0, TAU); ctx.stroke();
       }
     }
 

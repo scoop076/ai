@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct MiboTVApp: App {
@@ -15,6 +16,7 @@ struct ContentView: View {
     @ObservedObject var convo: Conversation
     @ObservedObject var speaker: Speaker
     @State private var showSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -33,6 +35,13 @@ struct ContentView: View {
                     .padding(.bottom, 70)
             }
 
+            // Mibo's doze: fades to almost black, the face just faintly visible.
+            Color.black
+                .opacity(convo.dozing ? 0.9 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .animation(.easeInOut(duration: convo.dozing ? 4 : 0.6), value: convo.dozing)
+
             // The whole screen is one button: click to talk, or to stop Mibo talking.
             // Press and hold for settings.
             Button(action: { convo.remoteTap() }) { Color.clear }
@@ -44,7 +53,14 @@ struct ContentView: View {
         }
         .onPlayPauseCommand { convo.remoteStop() }
         .sheet(isPresented: $showSettings) { SettingsView(convo: convo) }
-        .onAppear { if convo.needsSetup { showSettings = true } }
+        .onAppear {
+            // Keep the Apple screensaver away while My Mibo is open; Mibo dozes on its own instead.
+            UIApplication.shared.isIdleTimerDisabled = true
+            if convo.needsSetup { showSettings = true }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; convo.touch() }
+        }
         .onChange(of: convo.needsSetup) { _, now in if now { showSettings = true } }
     }
 
