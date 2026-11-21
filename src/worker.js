@@ -363,7 +363,7 @@ export default {
         try { await writer.close(); } catch {}
         if (full.trim()) {
           await mem.addTurn("assistant", heard ? full : full + " [Jim interrupted before hearing all of this]", device);
-          if (!/^\s*\[quiet/i.test(full)) { try { await updateNotes(env, mem, text, full, device); } catch {} }
+          if (!/^\s*\[(quiet|sleep)/i.test(full)) { try { await updateNotes(env, mem, text, full, device); } catch {} }
         }
       })());
       return new Response(readable, {
