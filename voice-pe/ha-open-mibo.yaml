@@ -5,8 +5,8 @@
 # and opens My Mibo. When the app connects, the speaker chimes and listens.
 #
 # Paste it in: Settings -> Automations & scenes -> + Create automation ->
-# Create new automation -> top-right menu -> Edit in YAML. Then change the two
-# entity names below to your Studio Apple TV's (Settings -> Devices & services
+# Create new automation -> top-right menu -> Edit in YAML. The entity names are
+# the Studio Apple TV's; for another room, change them (Settings -> Devices & services
 # -> Apple TV -> the Studio device shows them).
 alias: Hey Mibo opens My Mibo (Studio)
 description: The Mibo Voice speaker calls this when My Mibo isn't open.
@@ -20,12 +20,12 @@ actions:
   # Wake the Apple TV if it's asleep.
   - action: remote.turn_on
     target:
-      entity_id: remote.studio_tv
+      entity_id: remote.digital_art_studio_studio_tv
   - delay: 1
   # Open the app by its bundle ID (works even when the Apple TV has no app list).
   - action: media_player.play_media
     target:
-      entity_id: media_player.studio_tv
+      entity_id: media_player.digital_art_studio_studio_tv
     data:
       media_content_type: app
       media_content_id: com.liljimjim.mibotv
