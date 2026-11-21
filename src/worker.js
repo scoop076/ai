@@ -18,6 +18,7 @@ const NOTES_MODEL = "claude-haiku-5-5";
 const ELEVEN_MODELS = ["eleven_flash_v2_5", "eleven_multilingual_v2"];
 const AURA_MODEL = "@cf/deepgram/aura-2-en";
 const WHISPER_MODEL = "@cf/openai/whisper-large-v3-turbo";
+const FLUX_MODEL = "@cf/deepgram/flux";
 const AURA_VOICES = ["amalthea", "andromeda", "apollo", "arcas", "aries", "asteria", "athena", "atlas", "aurora", "callista", "cora", "cordelia", "delia", "draco", "electra", "harmonia", "helena", "hera", "hermes", "hyperion", "iris", "janus", "juno", "jupiter", "luna", "mars", "minerva", "neptune", "odysseus", "ophelia", "orion", "orpheus", "pandora", "phoebe", "pluto", "saturn", "thalia", "theia", "vesta", "zeus"];
 const ENGINES = ["eleven", "aura", "device"];
 
@@ -208,6 +209,9 @@ export default {
       try { body = await request.json(); } catch { return json({ error: "Bad request." }, 400); }
       const text = String(body.text || "").trim().slice(0, 4000);
       const device = String(body.device || "").slice(0, 60);
+      // An early reply, started before Jim finished talking: it's only saved (and its
+      // tools only run) once the app commits it with /api/chat/commit.
+      const draft = typeof body.draft === "string" && /^[A-Za-z0-9-]{8,64}$/.test(body.draft) ? body.draft : "";
       if (!text) return json({ error: "Nothing to send." }, 400);
       const mem = memoryStub(env);
       const canChange = !!env.FRAME_GITHUB_TOKEN;
@@ -262,7 +266,7 @@ export default {
         try { const j = await upstream.json(); detail = (j.error && j.error.message) || ""; } catch {}
         return json({ error: detail || "Claude returned status " + upstream.status }, upstream.status);
       }
-      await mem.addTurn("user", text, device);
+      if (!draft) await mem.addTurn("user", text, device);
 
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
@@ -289,6 +293,19 @@ export default {
               else if (d.type === "content_block_stop" && toolBlocks[d.index]) { toolCalls.push(toolBlocks[d.index]); delete toolBlocks[d.index]; }
             } catch {}
           }
+        }
+        // An early reply waits (up to 15 s) for the app to commit it; otherwise it's dropped.
+        if (draft) {
+          let committed = false;
+          for (let i = 0; i < 60 && !committed; i++) {
+            committed = await mem.isDraftCommitted(draft);
+            if (committed) break;
+            if (heard) { try { await writer.write(new TextEncoder().encode(": waiting\n\n")); } catch { heard = false; } }
+            if (!heard) { committed = await mem.isDraftCommitted(draft); break; }
+            await new Promise((r) => setTimeout(r, 250));
+          }
+          if (!committed) { try { await writer.close(); } catch {} return; }
+          await mem.addTurn("user", text, device);
         }
         // Carry out any change requests, and say the result if Claude didn't.
         for (const call of toolCalls) {
@@ -342,6 +359,15 @@ export default {
       return new Response(readable, {
         headers: { "content-type": "text/event-stream", "cache-control": "no-store" },
       });
+    }
+
+    // The app heard Jim finish saying exactly what an early reply was for: keep it.
+    if (url.pathname === "/api/chat/commit" && request.method === "POST") {
+      let body = {};
+      try { body = await request.json(); } catch {}
+      if (typeof body.draft !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(body.draft)) return json({ error: "Bad request." }, 400);
+      await memoryStub(env).commitDraft(body.draft);
+      return json({ ok: true });
     }
 
     // Changes the frame makes to itself (also approved from the settings panel).
@@ -492,6 +518,26 @@ export default {
         audio = bytes;
       }
       return new Response(audio, { headers: { "content-type": "audio/mpeg", "cache-control": "no-store" } });
+    }
+
+    // Live speech to text for the Apple TV app (Deepgram Flux on Workers AI, about
+    // three quarters of a cent per minute): the app streams 16 kHz 16-bit mono audio
+    // over a WebSocket while Jim talks and gets words plus end-of-turn signals back.
+    if (url.pathname === "/api/listen") {
+      if (!env.AI) return json({ error: "Workers AI isn't connected." }, 503);
+      if ((request.headers.get("Upgrade") || "").toLowerCase() !== "websocket") return json({ error: "WebSocket only." }, 426);
+      try {
+        return await env.AI.run(FLUX_MODEL, {
+          encoding: "linear16",
+          sample_rate: "16000",
+          eot_threshold: "0.7",
+          eager_eot_threshold: "0.5",   // lets the app start Claude early and hold the answer
+          eot_timeout_ms: "2000",
+          keyterm: "Mibo",
+        }, { websocket: true });
+      } catch (e) {
+        return json({ error: String((e && e.message) || e).slice(0, 200) }, 502);
+      }
     }
 
     // Speech to text for the Apple TV app: 16 kHz WAV in, words out (Whisper on
