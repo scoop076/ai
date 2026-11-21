@@ -1,0 +1,31 @@
+# Home Assistant automation: "Hey Mibo" opens My Mibo on the Studio Apple TV.
+#
+# The Mibo Voice speaker calls this webhook when it hears "Hey Mibo" and the
+# app isn't open. The automation wakes the Apple TV (and the TV, over HDMI-CEC)
+# and opens My Mibo. When the app connects, the speaker chimes and listens.
+#
+# Paste it in: Settings -> Automations & scenes -> + Create automation ->
+# Create new automation -> top-right menu -> Edit in YAML. Then change the two
+# entity names below to your Studio Apple TV's (Settings -> Devices & services
+# -> Apple TV -> the Studio device shows them).
+alias: Hey Mibo opens My Mibo (Studio)
+description: The Mibo Voice speaker calls this when My Mibo isn't open.
+mode: single
+triggers:
+  - trigger: webhook
+    webhook_id: mibo-open-studio
+    allowed_methods: [POST]
+    local_only: true
+actions:
+  # Wake the Apple TV if it's asleep.
+  - action: remote.turn_on
+    target:
+      entity_id: remote.studio
+  - delay: 1
+  # Open the app by name ("My Mibo" must be in the Apple TV's Sources list).
+  - action: media_player.select_source
+    continue_on_error: true
+    target:
+      entity_id: media_player.studio
+    data:
+      source: My Mibo

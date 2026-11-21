@@ -69,6 +69,32 @@ To go back to the original firmware anytime: esphome.github.io/home-assistant-vo
 Press and hold the remote's click button for Settings. Click once to talk (it opens the Voice PE's
 microphone) or to stop Mibo talking. Play/Pause also stops Mibo.
 
+### 5. "Hey Mibo" opens My Mibo (Home Assistant)
+When My Mibo isn't open, the speaker can't send your voice anywhere, so it asks Home Assistant to open
+the app instead: it calls a webhook (`http://homeassistant.local/api/webhook/mibo-open-studio`), and an
+automation wakes the Apple TV and opens My Mibo. When the app connects, the speaker chimes and listens,
+so you say "Hey Mibo", wait for the second chime, then ask. The ring spins while the app opens; it
+flashes red if Home Assistant didn't answer.
+1. Add the **Studio** Apple TV to Home Assistant: Settings → Devices & services → Add Integration →
+   **Apple TV**, pick the Studio one, and type the codes the TV shows. (Only the Apple TV integration;
+   keep ignoring "Mibo Voice".)
+2. Open the Studio Apple TV's media player entity and check that **My Mibo** is in its source list.
+3. Add the automation in `ha-open-mibo.yaml` (instructions at its top) and fix the two entity names.
+4. Test it from the Mac's Terminal with My Mibo closed:
+   `curl -X POST http://homeassistant.local/api/webhook/mibo-open-studio`
+5. If the speaker can't find `homeassistant.local`, put Home Assistant's IP address in
+   `mibo-voice-device.yaml`:
+   ```yaml
+   substitutions:
+     mibo_ha_url: http://192.168.86.XX   # your Home Assistant address
+   ```
+If **My Mibo** isn't in the source list, the app also answers the link `mibo://`: in the automation,
+replace the select_source step with `media_player.play_media`, `media_content_type: url`,
+`media_content_id: "mibo://open"`.
+
+My Mibo lets go of the speaker when you leave it (Home button or another app), so the next "Hey Mibo"
+opens it again. Free signing expires after 7 days; an expired app can't be opened this way either.
+
 ## Good to know
 - **Voice:** the built-in Kokoro voice engine (Google MediaPipe) only runs on iPhone and iPad, so the Apple TV
   speaks with the free Cloudflare Aura voices (each personality has one). If the daily free allowance runs out,

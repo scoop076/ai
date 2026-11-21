@@ -38,8 +38,17 @@ final class ESPHomeLink {
 
     init(host: String) { self.host = host }
 
-    func start() { q.async { self.running = true; self.connect() } }
-    func stop() { q.async { self.running = false; self.conn?.cancel(); self.conn = nil } }
+    func start() { q.async { self.running = true; self.retryDelay = 1; self.connect() } }
+    func stop() {
+        q.async {
+            self.running = false
+            let c = self.conn
+            self.conn = nil
+            c?.cancel()
+            self.listenKey = nil
+            if self.isReady { self.isReady = false; self.emit(.disconnected) }
+        }
+    }
     func change(host: String) { q.async { self.host = host; self.conn?.cancel() } }
 
     // MARK: Connection
