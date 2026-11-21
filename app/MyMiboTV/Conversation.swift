@@ -43,7 +43,11 @@ final class Conversation: ObservableObject {
     private var expectingFollowUp = false
     /// A conversation stays open (Mibo keeps listening) until Jim says "go quiet",
     /// or until nobody has talked for this long.
-    @Published private var sessionUntil: Date?
+    @Published private var sessionUntil: Date? {
+        // Quiet mode looks like Mibo's doze: a few seconds after the conversation ends, the
+        // screen fades almost to black with the face faintly showing. "Hey Mibo" wakes it.
+        didSet { if sessionUntil == nil && oldValue != nil { dozeSoon() } }
+    }
     private let sessionLength: TimeInterval = 60   // Jim's choice: quiet after a minute with no question
     private var inSession: Bool { (sessionUntil ?? .distantPast) > Date() }
     /// Quiet mode: show the "Say Hey Mibo" hint on the TV.
@@ -112,6 +116,13 @@ final class Conversation: ObservableObject {
     func touch() {
         lastActive = Date()
         if dozing { dozing = false }
+    }
+
+    private func dozeSoon() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.sessionUntil == nil, self.state == .idle, !self.speaker.isSpeaking else { return }
+            self.dozing = true
+        }
     }
 
     private func checkDoze() {
