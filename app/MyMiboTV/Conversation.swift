@@ -158,7 +158,6 @@ final class Conversation: ObservableObject {
         case .waiting: break
         case .speechStarted:
             hearingYou = true
-            sessionUntil = Date().addingTimeInterval(sessionLength)
             link?.event(.vadStart)
         case .speechEnded:
             print("My Mibo TV: you finished talking (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
@@ -202,13 +201,24 @@ final class Conversation: ObservableObject {
                 keepListening()
                 return
             }
-            youText = text
             if Self.isSleepCommand(text) {
+                youText = text
                 sessionUntil = nil
                 endRun(); state = .idle
                 show("Going quiet. Say \u{201C}Hey Mibo\u{201D} when you need me.", for: 4)
                 return
             }
+            // While the conversation stays open, Mibo only answers when someone says
+            // its name, so it stays out of other conversations in the room. The first
+            // question right after "Hey Mibo" (or the remote) is always for Mibo.
+            if isFollowUp && !Self.mentionsName(text) {
+                print("My Mibo TV: not for me (no \"Mibo\"): \(text)")
+                endRun(); state = .idle
+                keepListening()
+                return
+            }
+            youText = text
+            sessionUntil = Date().addingTimeInterval(sessionLength)
             link.event(.intentStart)
 
             var pending = "", full = "", started = false
@@ -329,8 +339,14 @@ final class Conversation: ObservableObject {
     static func isSleepCommand(_ text: String) -> Bool {
         let t = text.lowercased().replacingOccurrences(of: "[^a-z\\s']", with: " ", options: .regularExpression)
             .split(separator: " ").joined(separator: " ")
-        guard !t.isEmpty, t.split(separator: " ").count <= 6 else { return false }
-        return t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|stop listening|quiet mode|hush|shush)\\b", options: .regularExpression) != nil
+        guard !t.isEmpty, t.split(separator: " ").count <= 8 else { return false }
+        return t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|be silent|shut up|stop talking|stop listening|quiet mode|hush|shush)\\b", options: .regularExpression) != nil
+    }
+
+    /// Did Jim say Mibo's name? (Speech-to-text sometimes hears it as Meebo, Mebo, Mabel and so on.)
+    static func mentionsName(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return t.range(of: "\\b(mibo|meebo|mebo|miebo|mibbo|nibo|neebo|mybo|me bo|mi bo|mee bo|mabel|mable|maybel|mibel|mi-bo)\\b", options: .regularExpression) != nil
     }
 
     /// Whisper sometimes "hears" these in silence or TV noise.
