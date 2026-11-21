@@ -21,6 +21,9 @@ final class Conversation: ObservableObject {
     @Published private(set) var dozing = false
     private var lastActive = Date()
     private let dozeAfter: TimeInterval = 10 * 60
+    /// After this long with nothing going on, My Mibo closes itself (back to the Apple TV's
+    /// home screen). "Hey Mibo" opens it again through Home Assistant.
+    private let closeAfter: TimeInterval = 5 * 60
     private var dozeTimer: Timer?
 
     let speaker = Speaker()
@@ -41,7 +44,7 @@ final class Conversation: ObservableObject {
     /// A conversation stays open (Mibo keeps listening) until Jim says "go quiet",
     /// or until nobody has talked for this long.
     @Published private var sessionUntil: Date?
-    private let sessionLength: TimeInterval = 5 * 60
+    private let sessionLength: TimeInterval = 60   // Jim's choice: quiet after a minute with no question
     private var inSession: Bool { (sessionUntil ?? .distantPast) > Date() }
     /// Quiet mode: show the "Say Hey Mibo" hint on the TV.
     var showWakeHint: Bool { state == .idle && sessionUntil == nil && speakerConnected && !needsSetup }
@@ -95,6 +98,17 @@ final class Conversation: ObservableObject {
     }
 
     /// Something happened: stay awake (and wake up if dozing).
+    /// Close My Mibo. Let go of the speaker first, so the next "Hey Mibo" knows the app
+    /// is closed and asks Home Assistant to open it. (Fine for Jim's own Apple TVs; an App
+    /// Store version would need another way, since apps aren't supposed to quit themselves.)
+    private func closeApp() {
+        print("My Mibo TV: nothing for \(Int(closeAfter / 60)) minutes; closing")
+        cancelTurn()
+        sessionUntil = nil
+        link?.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { exit(0) }
+    }
+
     func touch() {
         lastActive = Date()
         if dozing { dozing = false }
@@ -103,6 +117,7 @@ final class Conversation: ObservableObject {
     private func checkDoze() {
         if state != .idle || sessionUntil != nil || speaker.isSpeaking { lastActive = Date(); return }
         if !dozing && Date().timeIntervalSince(lastActive) > dozeAfter { dozing = true }
+        if Date().timeIntervalSince(lastActive) > closeAfter && !needsSetup { closeApp() }
     }
 
     func apply(_ s: TVSettings) {
@@ -364,6 +379,17 @@ final class Conversation: ObservableObject {
                 }
             }
             guard my == turn else { return }
+            if Self.isSleepSignal(full) {
+                // Claude worked out that Jim wants quiet mode (the words may have come through
+                // garbled, like "Go, sir" for "go silent").
+                print("My Mibo TV: going quiet (Claude's call): \(text)")
+                youText = text
+                speaker.stop()
+                sessionUntil = nil
+                endRun(); state = .idle
+                show("Going quiet. Say \u{201C}Hey Mibo\u{201D} when you need me.", for: 4)
+                return
+            }
             if Self.isQuietSignal(full) {
                 // Mibo decided this wasn't meant for it: say nothing and keep listening.
                 print("My Mibo TV: not for me: \(text)")
@@ -710,7 +736,7 @@ final class Conversation: ObservableObject {
             .split(separator: " ").joined(separator: " ")
         guard !t.isEmpty else { return false }
         let words = t.split(separator: " ").count
-        if words <= 10, t.range(of: "\\b(go (silent|quiet|to sleep)|be quiet|be silent|shut up|stop talking|stop listening|quiet mode|hush|shush|stop interrupting|stop interjecting|don'?t interrupt|don'?t interject|stay out of (it|this)|leave us alone|not talking to you|i'?m not talking to you|we'?re not talking to you|quiet down|zip it|pipe down)\\b", options: .regularExpression) != nil {
+        if words <= 10, t.range(of: "\\b(go (silent|silence|quiet|quite|to sleep|sir|sire)|you'?re silent|be quiet|be silent|shut up|stop talking|stop listening|quiet mode|hush|shush|stop interrupting|stop interjecting|don'?t interrupt|don'?t interject|stay out of (it|this)|leave us alone|not talking to you|i'?m not talking to you|we'?re not talking to you|quiet down|zip it|pipe down)\\b", options: .regularExpression) != nil {
             return true
         }
         // Very short ones: "Mibo, quiet." "Stop." "Enough."
@@ -723,7 +749,12 @@ final class Conversation: ObservableObject {
     }
     static func mayBeQuietSignal(_ s: String) -> Bool {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return t.isEmpty || (t.count < 7 && "[quiet]".hasPrefix(t)) || t.hasPrefix("[quiet")
+        return t.isEmpty || (t.count < 7 && ("[quiet]".hasPrefix(t) || "[sleep]".hasPrefix(t)))
+            || t.hasPrefix("[quiet") || t.hasPrefix("[sleep")
+    }
+    /// Claude answers "[sleep]" when Jim wants Mibo to go quiet.
+    static func isSleepSignal(_ s: String) -> Bool {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("[sleep")
     }
 
     /// Did Jim say Mibo's name? (Speech-to-text sometimes hears it as Meebo, Mebo, Mabel and so on.)
@@ -753,6 +784,7 @@ final class Conversation: ObservableObject {
             "You can search the web for current or specific information.",
             "When it fits naturally, you may end with a short question to keep the conversation going.",
             "Speech-to-text often mishears your name Mibo as Miguel, Meebo, Mabel or Nibo; treat those as your name.",
+            "If Jim wants you to go quiet, stop listening, or leave him alone (go silent, go quiet, go to sleep, that's all, never mind, and so on), reply with exactly [sleep] and nothing else. Speech-to-text often garbles this, so treat things like \"go, sir\", \"you're silent\" or \"go quite\" the same way.",
             "In a conversation with you, a clear request or question (like \"tell me a story\" or \"what's a music box?\") is for you, even without your name; answer it.",
             "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
@@ -920,8 +952,9 @@ struct BargeDetector {
     static let needTime = 0.25       // above the bar this long in total...
     static let needWindow = 0.8      // ...within this long
     static let ignoreFirst = 0.6     // Mibo's voice starting up through the TV can spike
-    /// The bar is at least this much above Mibo's loudest.
-    static let overMibo = 1.3
+    /// The bar is at least this much above Mibo's loudest. (1.3 let Mibo's own louder
+    /// moments through now and then; Jim's firm voice measures 600-1,300 vs Mibo's ~250-300.)
+    static let overMibo = 1.6
 
     private let miboPeak: Double     // learned: Mibo's voice at its loudest (97th percentile)
     private let jimVoice: Double     // learned: Jim's usual talking level (80th percentile)
