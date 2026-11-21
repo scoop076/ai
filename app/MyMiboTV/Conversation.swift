@@ -28,6 +28,11 @@ final class Conversation: ObservableObject {
     private var recording = Data()
     private var isFollowUp = false
     private var expectingFollowUp = false
+    /// A conversation stays open (Mibo keeps listening) until Jim says "go quiet",
+    /// or until nobody has talked for this long.
+    private var sessionUntil: Date?
+    private let sessionLength: TimeInterval = 5 * 60
+    private var inSession: Bool { (sessionUntil ?? .distantPast) > Date() }
     private var turn = 0
     private var replyTask: Task<Void, Never>?
     private var noteClear: DispatchWorkItem?
@@ -118,7 +123,8 @@ final class Conversation: ObservableObject {
         turn += 1
         isFollowUp = expectingFollowUp
         expectingFollowUp = false
-        vad = VoiceDetector(waitForSpeech: 8)   // seconds to start talking, after "Hey Mibo" or a reply
+        if !isFollowUp { sessionUntil = Date().addingTimeInterval(sessionLength) }   // "Hey Mibo" opens a conversation
+        vad = VoiceDetector(waitForSpeech: 20)   // seconds to start talking, after "Hey Mibo" or a reply
         recording = Data()
         youText = ""
         link.acceptStart()
@@ -132,13 +138,26 @@ final class Conversation: ObservableObject {
         recording.append(pcm)
         switch vad.feed(pcm) {
         case .waiting: break
-        case .speechStarted: link?.event(.vadStart)
+        case .speechStarted:
+            sessionUntil = Date().addingTimeInterval(sessionLength)
+            link?.event(.vadStart)
         case .speechEnded:
             print("My Mibo TV: you finished talking (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
             link?.event(.vadEnd); finishedTalking()
         case .nothingSaid:
             print("My Mibo TV: heard nothing (loudest \(Int(vad.peak)), background \(Int(vad.background)))")
             endRun(); state = .idle
+            keepListening()
+        }
+    }
+
+    /// Still in a conversation: open the mic again so Jim doesn't need "Hey Mibo".
+    private func keepListening() {
+        guard inSession else { sessionUntil = nil; return }
+        expectingFollowUp = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard self.state == .idle, self.inSession else { self.expectingFollowUp = false; return }
+            if self.link?.listenAgain() != true { self.expectingFollowUp = false }
         }
     }
 
@@ -160,10 +179,12 @@ final class Conversation: ObservableObject {
             link.event(.sttEnd, [("text", text)])
             if text.isEmpty || Self.isNoise(text) {
                 endRun(); state = .idle
+                keepListening()
                 return
             }
             youText = text
             if Self.isSleepCommand(text) {
+                sessionUntil = nil
                 endRun(); state = .idle
                 show("Going quiet. Say \u{201C}Hey Mibo\u{201D} when you need me.", for: 4)
                 return
@@ -201,7 +222,7 @@ final class Conversation: ObservableObject {
                 }
                 speaker.add(pending)
             }
-            if !started { endRun(); state = .idle; return }
+            if !started { endRun(); state = .idle; keepListening(); return }
             speaker.finishQueue()
         } catch {
             guard my == turn, !(error is CancellationError) else { return }
@@ -217,12 +238,7 @@ final class Conversation: ObservableObject {
         guard my == turn, state == .speaking else { return }
         endRun()
         state = .idle
-        // Keep the conversation going: open the mic again for a follow-up.
-        expectingFollowUp = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            guard self.state == .idle else { return }
-            if self.link?.listenAgain() != true { self.expectingFollowUp = false }
-        }
+        keepListening()
     }
 
     private func endRun() { link?.event(.runEnd) }
@@ -252,7 +268,10 @@ final class Conversation: ObservableObject {
         }
     }
 
-    func remoteStop() { if state != .idle { cancelTurn() } }
+    func remoteStop() {
+        sessionUntil = nil
+        if state != .idle { cancelTurn() }
+    }
 
     // MARK: Helpers
 
