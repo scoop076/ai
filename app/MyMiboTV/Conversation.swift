@@ -70,7 +70,7 @@ final class Conversation: ObservableObject {
     private var roomFloor = 500.0
     private var ignoreAudioUntil = Date.distantPast
     private var connectedAt = Date.distantPast
-    private var saidYesAt = Date.distantPast      // when Mibo last said "Yes?" 
+    private var saidYesAt = Date.distantPast      // when Mibo last said its hello
 
     // Live words (Deepgram Flux): Jim's speech is turned into words while he talks, and
     // Flux decides when he's finished, so Mibo can answer sooner. Whisper is the backup.
@@ -192,7 +192,7 @@ final class Conversation: ObservableObject {
         persona = id
         speaker.voice = id == "claude" ? defaultVoice : (personaVoices[id] ?? defaultVoice)
         UserDefaults.standard.set(speaker.voice, forKey: "lastVoice")
-        speaker.prepareCue("Yes?")
+        speaker.prepareCue(nextHello)
         speaker.prepareCue(nextBye)
         accessory = id == "claude" ? nil : personaLooks[id]
     }
@@ -260,21 +260,35 @@ final class Conversation: ObservableObject {
         // Just after launch, give the preferences (Mibo's voice) up to 2 s to load.
         Task {
             for _ in 0..<20 where !self.prefsLoaded { try? await Task.sleep(nanoseconds: 100_000_000) }
-            self.speaker.cue("Yes?")
+            self.lastHello = self.nextHello
+            self.speaker.cue(self.nextHello)
+            self.nextHello = Self.hellos.filter { $0 != self.nextHello }.randomElement()!
+            self.speaker.prepareCue(self.nextHello)
         }
     }
 
     private var prefsLoaded = false
+    /// Mibo's hello when Jim says just "Hey Mibo" (a different one each time).
+    static let hellos = ["Hey girl!", "What's up, home skillet?", "I'm here, dawg!", "Yo!", "Sup?", "You rang?",
+                         "Mibo in the house!", "What's crackin'?", "Talk to me!", "Hey hey!", "At your service!", "Ready when you are!"]
+    private var nextHello = Conversation.hellos.randomElement()!
+    private var lastHello = "" 
     /// Mibo's goodbye when Jim says "go away" (a different one each time).
     static let goodbyes = ["Peace out!", "I'm out!", "Gone girl!", "Later, gator!", "Catch you on the flip side!",
                            "Smell ya later!", "Mibo out!", "Deuces!", "Toodles!", "Poof!", "Adios!", "Ghosting you now!"]
     private var nextBye = Conversation.goodbyes.randomElement()!
 
-    /// The speaker also hears Mibo's own "Yes?" from the TV: drop it from the start of Jim's words.
+    /// The speaker also hears Mibo's own hello from the TV: drop it from the start of Jim's
+    /// words (when enough of it is there that it can't just be Jim starting a sentence).
     private func withoutOwnYes(_ text: String) -> String {
-        guard Date().timeIntervalSince(saidYesAt) < 6 else { return text }
-        let r = text.replacingOccurrences(of: "^\\s*(yes|yeah|yep)[.?!,]*\\s*", with: "", options: [.regularExpression, .caseInsensitive])
-        return r
+        guard Date().timeIntervalSince(saidYesAt) < 6, !lastHello.isEmpty else { return text }
+        func norm(_ w: Substring) -> String { w.lowercased().replacingOccurrences(of: "[^a-z0-9']", with: "", options: .regularExpression) }
+        let hello = Set(lastHello.split(separator: " ").map(norm).filter { !$0.isEmpty })
+        let words = text.split(separator: " ")
+        var n = 0
+        while n < words.count && hello.contains(norm(words[n])) { n += 1 }
+        guard n >= min(2, hello.count) else { return text }
+        return words.dropFirst(n).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func heard(_ pcm: Data, raw: Data? = nil) {
