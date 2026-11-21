@@ -79,19 +79,17 @@ flashes red if Home Assistant didn't answer.
 1. Add the **Studio** Apple TV to Home Assistant: Settings → Devices & services → Add Integration →
    **Apple TV**, pick the Studio one, and type the codes the TV shows. (Only the Apple TV integration;
    keep ignoring "Mibo Voice".)
-2. Open the Studio Apple TV's media player entity and check that **My Mibo** is in its source list.
-3. Add the automation in `ha-open-mibo.yaml` (instructions at its top) and fix the two entity names.
-4. Test it from the Mac's Terminal with My Mibo closed:
+2. Add the automation in `ha-open-mibo.yaml` (instructions at its top) and fix the two entity names.
+3. Test it from the Mac's Terminal with My Mibo closed:
    `curl -X POST http://homeassistant.local/api/webhook/mibo-open-studio`
-5. If the speaker can't find `homeassistant.local`, put Home Assistant's IP address in
+4. If the speaker can't find `homeassistant.local`, put Home Assistant's IP address in
    `mibo-voice-device.yaml`:
    ```yaml
    substitutions:
      mibo_ha_url: http://192.168.86.XX   # your Home Assistant address
    ```
-If **My Mibo** isn't in the source list, the app also answers the link `mibo://`: in the automation,
-replace the select_source step with `media_player.play_media`, `media_content_type: url`,
-`media_content_id: "mibo://open"`.
+The automation opens the app by its bundle ID (`com.liljimjim.mibotv`). If that ever fails, the app
+also answers the link `mibo://`: use `media_content_type: url`, `media_content_id: "mibo://open"`.
 
 My Mibo lets go of the speaker when you leave it (Home button or another app), so the next "Hey Mibo"
 opens it again. Free signing expires after 7 days; an expired app can't be opened this way either.

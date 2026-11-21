@@ -20,12 +20,12 @@ actions:
   # Wake the Apple TV if it's asleep.
   - action: remote.turn_on
     target:
-      entity_id: remote.studio
+      entity_id: remote.studio_tv
   - delay: 1
-  # Open the app by name ("My Mibo" must be in the Apple TV's Sources list).
-  - action: media_player.select_source
-    continue_on_error: true
+  # Open the app by its bundle ID (works even when the Apple TV has no app list).
+  - action: media_player.play_media
     target:
-      entity_id: media_player.studio
+      entity_id: media_player.studio_tv
     data:
-      source: My Mibo
+      media_content_type: app
+      media_content_id: com.liljimjim.mibotv
