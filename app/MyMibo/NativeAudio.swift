@@ -289,12 +289,21 @@ final class NativeAudio: NSObject {
     // Built outside the class's own methods so these closures carry no thread assumptions.
     private static func makeTap(_ req: SFSpeechAudioBufferRecognitionRequest, id: String) -> AVAudioNodeTapBlock {
         let told = Flag()
+        let count = Counter()
         return { buffer, _ in
             req.append(buffer)
             if !told.value {
                 told.value = true
                 DispatchQueue.main.async { NativeAudio.shared.heardAudio(id) }
             }
+            // How loud Jim is, a few dozen times a second, for the face's listening ring.
+            count.value += 1
+            guard count.value % 2 == 0, let ch = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+            let n = Int(buffer.frameLength)
+            var sum: Float = 0
+            for i in 0..<n { sum += ch[i] * ch[i] }
+            let rms = sqrt(sum / Float(n))
+            DispatchQueue.main.async { NativeAudio.shared.heardLevel(id, Double(rms)) }
         }
     }
 
@@ -307,6 +316,11 @@ final class NativeAudio: NSObject {
                 NativeAudio.shared.recognized(id: id, text: text, isFinal: isFinal, failed: failed)
             }
         }
+    }
+
+    private func heardLevel(_ id: String, _ rms: Double) {
+        guard listenId == id && mode == .listen else { return }
+        send(["type": "mic", "value": rms])
     }
 
     private func heardAudio(_ id: String) {
@@ -584,3 +598,4 @@ final class SynthEvents: NSObject, AVSpeechSynthesizerDelegate {
 
 /// A tiny box so the microphone tap can remember it already reported audio.
 final class Flag { var value = false }
+final class Counter { var value = 0 }

@@ -375,6 +375,16 @@ body.no-captions .captions { visibility: hidden; }
      mute. In a normal browser none of this runs. */
   const APP = (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.frame) || null;
   let nativeLevel = 0, nativeVoices = [], nativeSeq = 0;
+  /* How loud Jim is while Mibo listens (0..1), measured against the room's own background noise,
+     so the ring swells with his voice and stays still for the hum of the room. */
+  let micLevel = 0, micFloor = 0.004, micPeak = 0.02, micAt = 0;
+  function heardMic(rms) {
+    micAt = Date.now();
+    micFloor = rms < micFloor ? micFloor + (rms - micFloor) * 0.2 : micFloor + (rms - micFloor) * 0.004;
+    const over = Math.max(0, rms - micFloor * 1.8);
+    micPeak = Math.max(over, micPeak * 0.997, 0.02);
+    micLevel = Math.min(1, over / micPeak);
+  }
   let kokoro = { status: "off", progress: 0 };   // Mibo's built-in voice in the app
   const playWaiters = {}, sayCbs = {}, listeners = {};
   function toApp(msg) { try { APP.postMessage(msg); } catch {} }
@@ -400,6 +410,7 @@ body.no-captions .captions { visibility: hidden; }
     else if (e.type === "error") { if (r && r.onerror) r.onerror({ error: e.error }); }
     else if (e.type === "end") { if (r) { delete listeners[e.id]; if (r.onend) r.onend(); } }
     else if (e.type === "level") nativeLevel = Number(e.value) || 0;
+    else if (e.type === "mic") heardMic(Number(e.value) || 0);
     else if (e.type === "played") { const f = playWaiters[e.id]; delete playWaiters[e.id]; if (f) f(); }
     else if (e.type === "sayStart") { const c = sayCbs[e.id]; if (c) c.start(); }
     else if (e.type === "boundary") kick = 1;
@@ -1761,7 +1772,7 @@ body.no-captions .captions { visibility: hidden; }
 
   const TAU = Math.PI * 2, motion = reduceMotion ? 0.3 : 1;
   const gaze = { x: 0, y: 0 }, gazeT = { x: 0, y: 0 };
-  let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, thinkAmt = 0, lastT = 0;
+  let nextWander = 0, blinkAt = -1, nextBlink = 2, mouth = 0, listenAmt = 0, micAmt = 0, thinkAmt = 0, lastT = 0;
   const ease = (cur, target, rate, dt) => cur + (target - cur) * (1 - Math.exp(-rate * dt));
   function hexRGB(hex) {
     const h = String(hex).replace("#", "");
@@ -1867,6 +1878,8 @@ body.no-captions .captions { visibility: hidden; }
       : 0;
     mouth = ease(mouth, mTarget, level >= 0 ? 28 : 18, dt);
     listenAmt = ease(listenAmt, state === "listening" ? 1 : 0, 6, dt);
+    if (Date.now() - micAt > 300) micLevel = 0;   // no fresh sound from the microphone
+    micAmt = ease(micAmt, state === "listening" ? micLevel : 0, 18, dt);
     thinkAmt = ease(thinkAmt, state === "thinking" ? 1 : 0, 6, dt);
 
     ctx.clearRect(0, 0, W, H);
@@ -1892,6 +1905,12 @@ body.no-captions .captions { visibility: hidden; }
         ctx.strokeStyle = rgba(C.listen, listenAmt * 0.55 * (1 - p));
         ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(cx, cy, R * (1.12 + 0.35 * p * motion), 0, TAU); ctx.stroke();
+      }
+      // A ring that swells with Jim's voice, so he can see Mibo hearing him and how loud.
+      if (micAmt > 0.02) {
+        ctx.strokeStyle = rgba(C.listen, Math.min(1, 0.35 + micAmt));
+        ctx.lineWidth = Math.max(3, R * (0.03 + 0.05 * micAmt));
+        ctx.beginPath(); ctx.arc(cx, cy, R * (1.08 + 0.3 * micAmt), 0, TAU); ctx.stroke();
       }
     }
 
