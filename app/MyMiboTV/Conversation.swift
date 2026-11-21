@@ -27,6 +27,12 @@ final class Conversation: ObservableObject {
     private var dozeTimer: Timer?
 
     let speaker = Speaker()
+    /// Jim's Plex movies, played right here in My Mibo.
+    let plex = PlexLibrary()
+    let movie = MoviePlayer()
+    /// A command at the start of Claude's reply ("[play collection=…]", "[movie pause]"),
+    /// carried out once Mibo has said its short confirmation.
+    private var pendingCommand: String?
     private var link: ESPHomeLink?
     private var server: MiboServer?
     private var settings = TVSettings.load()
@@ -135,13 +141,13 @@ final class Conversation: ObservableObject {
 
     private func dozeSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, self.sessionUntil == nil, self.state == .idle, !self.speaker.isSpeaking else { return }
+            guard let self, self.sessionUntil == nil, self.state == .idle, !self.speaker.isSpeaking, !self.movie.showing else { return }
             self.dozing = true
         }
     }
 
     private func checkDoze() {
-        if state != .idle || sessionUntil != nil || speaker.isSpeaking { lastActive = Date(); return }
+        if state != .idle || sessionUntil != nil || speaker.isSpeaking || movie.showing { lastActive = Date(); return }
         if !dozing && Date().timeIntervalSince(lastActive) > dozeAfter { dozing = true }
         if Date().timeIntervalSince(lastActive) > closeAfter && !needsSetup { closeApp() }
     }
@@ -160,6 +166,8 @@ final class Conversation: ObservableObject {
             l.start()
         }
         Task { await loadPrefs() }
+        movie.plex = plex
+        Task { await plex.refresh() }
     }
 
     var currentSettings: TVSettings { settings }
@@ -236,6 +244,8 @@ final class Conversation: ObservableObject {
         turn += 1
         bargeMicPending = false; bargeMic = false
         early?.cancel(); early = nil
+        // "Hey Mibo" during a movie pauses it; it carries on after Mibo answers.
+        if movie.isPlaying { movie.pause(); movie.autoPaused = true }
         isFollowUp = expectingFollowUp
         expectingFollowUp = false
         if !isFollowUp { sessionUntil = Date().addingTimeInterval(sessionLength) }   // "Hey Mibo" opens a conversation
@@ -325,6 +335,8 @@ final class Conversation: ObservableObject {
 
     /// Still in a conversation: open the mic again so Jim doesn't need "Hey Mibo".
     private func keepListening() {
+        // During a movie Mibo answers once, then the movie carries on (no open mic).
+        if movie.showing { endForMovie(); return }
         guard inSession else { sessionUntil = nil; return }
         expectingFollowUp = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -397,6 +409,7 @@ final class Conversation: ObservableObject {
                 youText = text
                 sessionUntil = nil
                 endRun(); state = .idle
+                if movie.showing && movie.autoPaused { movie.resume() }
                 show("Going quiet. Say \u{201C}Hey Mibo\u{201D} when you need me.", for: 4)
                 return
             }
@@ -408,6 +421,8 @@ final class Conversation: ObservableObject {
 
             var pending = "", full = "", started = false
             spokenSoFar = ""
+            pendingCommand = nil
+            var commandChecked = false
             speaker.begin()
             speaker.onDone = { [weak self] in self?.doneSpeaking(turn: my) }
             let answer: AsyncThrowingStream<MiboServer.ChatEvent, Error>
@@ -416,7 +431,7 @@ final class Conversation: ObservableObject {
                 Task { await server.commit(draft: head.draft) }
                 answer = head.events()
             } else {
-                answer = server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp, interrupted: interruptedNow), model: "claude-haiku-5-5", device: settings.screenName)
+                answer = server.chat(text: text, system: Self.rules(screen: settings.screenName, justWoken: !isFollowUp, interrupted: interruptedNow, media: mediaContext()), model: "claude-haiku-5-5", device: settings.screenName)
             }
             for try await ev in answer {
                 guard my == turn else { return }
@@ -427,6 +442,18 @@ final class Conversation: ObservableObject {
                     spokenSoFar = full
                     // Wait until we know it isn't the "[quiet]" signal before speaking.
                     if Self.mayBeQuietSignal(full) { continue }
+                    // A command first ("[play collection=…]")? Wait for all of it, keep it for
+                    // later, and speak only what comes after it.
+                    if !commandChecked {
+                        let lead = full.drop(while: { $0.isWhitespace })
+                        if lead.hasPrefix("[") {
+                            guard let close = lead.firstIndex(of: "]") else { continue }
+                            let cmd = String(lead[...close])
+                            if Self.isCommand(cmd) { pendingCommand = cmd; print("My Mibo TV: command \(cmd)") }
+                            pending = String(lead[lead.index(after: close)...])
+                        }
+                        commandChecked = true
+                    }
                     while case let (chunk, rest)? = Self.nextChunk(pending, first: !started) {
                         pending = rest
                         if !started {
@@ -476,7 +503,11 @@ final class Conversation: ObservableObject {
                 }
                 speaker.add(pending)
             }
-            if !started { endRun(); state = .idle; keepListening(); return }
+            if !started {
+                endRun(); state = .idle
+                if let cmd = pendingCommand { pendingCommand = nil; runCommand(cmd); endForMovie(); return }
+                keepListening(); return
+            }
             speaker.finishQueue()
         } catch {
             guard my == turn, !(error is CancellationError) else { return }
@@ -495,6 +526,10 @@ final class Conversation: ObservableObject {
             miboPeak = miboPeak > 0 ? miboPeak * 0.5 + v * 0.5 : v
             print("My Mibo TV: learned Mibo's loudest: \(Int(miboPeak))")
         }
+        let cmd = pendingCommand
+        pendingCommand = nil
+        if let cmd { runCommand(cmd) }
+        if movie.showing || (cmd?.lowercased().hasPrefix("[play") ?? false) { endForMovie(); return }
         if bargeMic {
             // The mic is already open, so Jim's turn starts now, with no gap or cue.
             bargeMic = false
@@ -550,7 +585,7 @@ final class Conversation: ObservableObject {
             early?.cancel()
             print("My Mibo TV: probably done: \(text)")
             early = EarlyReply(text: text, stream: { draft in
-                server.chat(text: text, system: Self.rules(screen: self.settings.screenName, justWoken: !self.isFollowUp, interrupted: self.wasInterrupted), model: "claude-haiku-5-5", device: self.settings.screenName, draft: draft)
+                server.chat(text: text, system: Self.rules(screen: self.settings.screenName, justWoken: !self.isFollowUp, interrupted: self.wasInterrupted, media: self.mediaContext()), model: "claude-haiku-5-5", device: self.settings.screenName, draft: draft)
             })
         case .resumed:
             early?.cancel(); early = nil
@@ -645,11 +680,81 @@ final class Conversation: ObservableObject {
         return norm(a) == norm(b)
     }
 
+    // MARK: Movies (Plex)
+
+    /// What Claude needs to know to play and control movies.
+    private func mediaContext() -> String {
+        let lib = plex.summary
+        guard !lib.isEmpty || movie.showing else { return "" }
+        var s = lib + " You can play these movies on this TV yourself. To do it, start your reply with exactly one command, then a short, fun confirmation of a few words (like \"Rolling it!\"): [play movie=\"Title\"] for a movie (the title as Jim says it), [play collection=\"Exact Name\"] for a collection (its first unwatched movie), or [play collection=\"Exact Name\" shuffle] to shuffle a collection (random movies, one after another). Use collection names exactly as listed. If Jim asks what's in his library, answer from the list. While a movie is on you can also use [movie pause], [movie resume], [movie stop], [movie forward 600] or [movie back 30] (seconds), [movie restart], or [movie next]. Never say the command out loud or explain it."
+        if movie.showing {
+            s += " " + movie.status + " Jim's \"Hey Mibo\" paused it; it carries on by itself after you answer, unless you pause or stop it. Keep answers short so he can get back to the movie."
+        }
+        return s
+    }
+
+    static func isCommand(_ c: String) -> Bool {
+        let l = c.lowercased()
+        return l.hasPrefix("[play ") || l.hasPrefix("[movie ")
+    }
+
+    /// Do what Claude asked for.
+    private func runCommand(_ cmd: String) {
+        let l = cmd.lowercased()
+        if l.hasPrefix("[play") {
+            let shuffle = l.contains("shuffle")
+            let name = cmd.range(of: "\"([^\"]+)\"", options: .regularExpression).map { String(cmd[$0]).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) } ?? ""
+            let isCollection = l.contains("collection")
+            sessionUntil = nil
+            Task { await playRequest(name: name, collection: isCollection, shuffle: shuffle) }
+            return
+        }
+        let n = Double(l.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)) ?? 0
+        if l.contains("pause") { movie.pause(); movie.autoPaused = false }
+        else if l.contains("resume") || l.contains("play") { movie.resume() }
+        else if l.contains("stop") { movie.close() }
+        else if l.contains("forward") { movie.seek(by: n > 0 ? n : 30); movie.resume() }
+        else if l.contains("back") { movie.seek(by: -(n > 0 ? n : 30)); movie.resume() }
+        else if l.contains("restart") { movie.restart() }
+        else if l.contains("next") { movie.next() }
+    }
+
+    private func playRequest(name: String, collection: Bool, shuffle: Bool) async {
+        if plex.collections.isEmpty && plex.movieCount == 0 { await plex.refresh() }
+        var list: [PlexLibrary.Movie] = []
+        if collection, let c = plex.findCollection(name) {
+            let movies = await plex.movies(in: c)
+            if shuffle { list = movies.shuffled() }
+            else if let first = movies.first(where: { !$0.watched }) ?? movies.first { list = [first] }
+            print("My Mibo TV: collection \(c.title): \(movies.count) movies")
+        } else if let m = await plex.findMovie(name) {
+            list = [m]
+        } else if let c = plex.findCollection(name) {     // Claude said "movie" but it's a collection
+            list = await plex.movies(in: c).shuffled()
+        }
+        guard !list.isEmpty else {
+            print("My Mibo TV: couldn't find \(name) in Plex")
+            speaker.cue("Hmm, I couldn't find \(name) in Plex.")
+            return
+        }
+        movie.play(list)
+    }
+
+    /// After Mibo answers during (or to start) a movie: no open mic, the movie carries on.
+    private func endForMovie() {
+        bargeMic = false; bargeMicPending = false
+        endRun()
+        state = .idle
+        sessionUntil = nil
+        expectingFollowUp = false
+        if movie.showing && movie.autoPaused { movie.resume() }
+    }
+
     // MARK: Talking over Mibo
 
     /// Mibo just started answering: open the speaker's mic so Jim can talk over it.
     private func requestBargeMic() {
-        guard inSession, link != nil, !bargeMic, !bargeMicPending else { return }
+        guard inSession, link != nil, !bargeMic, !bargeMicPending, !movie.showing else { return }
         endRun()                      // frees the speaker for a new run; the reply keeps playing on the TV
         bargeMicPending = true
         expectingFollowUp = true
@@ -850,7 +955,7 @@ final class Conversation: ObservableObject {
                 "mibo", "collinsville", "mibo collinsville", "meebo", "hey mibo"].contains(t)
     }
 
-    static func rules(screen: String, justWoken: Bool = false, interrupted: Bool = false) -> String {
+    static func rules(screen: String, justWoken: Bool = false, interrupted: Bool = false, media: String = "") -> String {
         let f = DateFormatter()
         f.dateFormat = "EEEE, MMMM d, yyyy, h:mm a"
         return [
@@ -870,7 +975,7 @@ final class Conversation: ObservableObject {
             "Apologize only when a real mistake truly calls for it, once and briefly, then move on. Once something is corrected, don't restate or re-correct it or remind Jim of past mistakes unless he asks or it affects what he's doing now.",
             "The current date and time is \(f.string(from: Date())).",
             "Jim is talking to you right now from the screen he calls \"\(screen)\", which is an Apple TV. He talks to you through the Mibo Voice speaker in the room, and you appear and speak on the TV. The frame can run on several of his screens around the house and on his phone. Use this naturally when it matters, for example if he asks where you are or which screen he's on, but don't announce it otherwise.",
-        ].joined(separator: " ") + (justWoken
+        ].joined(separator: " ") + (media.isEmpty ? "" : " " + media) + (justWoken
             ? " Jim just said \"Hey Mibo\", so this message is for you: answer it (never reply [quiet] to it)."
             : "") + (interrupted
             ? " Jim just talked over you while you were answering, so you stopped partway and he heard only the beginning of your last reply. What he said reached you mixed with your own voice from the TV, so the words may include bits of your own reply or be garbled: ignore any of your own words, and work out what he asked (for example a question about something in your story). Answer it briefly. If you truly can't tell what he said, ask in a few words, like \"Sorry, what was that?\" Reply [quiet] only if it's clearly someone else talking to another person. Don't resume the old answer unless Jim asks."
