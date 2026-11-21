@@ -144,8 +144,18 @@ function when(ts) {
 
 // Turn saved history into alternating user/assistant messages for Claude.
 function buildMessages(recent, text, device) {
-  const msgs = [];
+  // Leave out exchanges Mibo decided weren't for it (it answered "[quiet]"): overheard
+  // talk and its own voice. A run of them made Claude keep answering [quiet].
+  const kept = [];
   for (const t of recent) {
+    if (t.role === "assistant" && /^\s*\[quiet/i.test(t.content)) {
+      if (kept.length && kept[kept.length - 1].role === "user") kept.pop();
+      continue;
+    }
+    kept.push(t);
+  }
+  const msgs = [];
+  for (const t of kept) {
     const content = t.role === "user" ? "[" + when(t.ts) + (t.device ? " · " + t.device : "") + "] " + t.content : t.content;
     const last = msgs[msgs.length - 1];
     if (last && last.role === t.role) last.content += "\n" + content;
@@ -353,7 +363,7 @@ export default {
         try { await writer.close(); } catch {}
         if (full.trim()) {
           await mem.addTurn("assistant", heard ? full : full + " [Jim interrupted before hearing all of this]", device);
-          try { await updateNotes(env, mem, text, full, device); } catch {}
+          if (!/^\s*\[quiet/i.test(full)) { try { await updateNotes(env, mem, text, full, device); } catch {} }
         }
       })());
       return new Response(readable, {
