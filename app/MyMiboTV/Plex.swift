@@ -17,6 +17,8 @@ final class PlexLibrary {
         let viewOffset: Double      // seconds already watched
         let watched: Bool
         let directPart: String?     // a file the Apple TV can play as-is (mp4 + H.264), if any
+        let summary: String
+        let thumb: String?          // poster
     }
     struct Collection {
         let key: String
@@ -163,6 +165,15 @@ final class PlexLibrary {
         }
     }
 
+    /// The movie's poster, for the player's info panel.
+    func poster(_ m: Movie) async -> Data? {
+        guard let thumb = m.thumb else { return nil }
+        var c = URLComponents(url: Self.base.appendingPathComponent(thumb), resolvingAgainstBaseURL: false)!
+        c.queryItems = headers.map { URLQueryItem(name: $0.key, value: $0.value) }
+        guard let url = c.url, let (d, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        return d
+    }
+
     func markWatched(_ m: Movie) {
         Task { _ = try? await get(":/scrobble", [.init(name: "key", value: m.key), .init(name: "identifier", value: "com.plexapp.plugins.library")]) }
     }
@@ -184,7 +195,8 @@ final class PlexLibrary {
         let playable = ["mp4", "m4v", "mov"].contains(container) && video == "h264" && ["aac", "ac3", "eac3", "mp3"].contains(audio)
         return Movie(key: key, title: title, year: num(d["year"]).map { Int($0) },
                      duration: (num(d["duration"]) ?? 0) / 1000, viewOffset: (num(d["viewOffset"]) ?? 0) / 1000,
-                     watched: (num(d["viewCount"]) ?? 0) > 0, directPart: playable ? (part?["key"] as? String) : nil)
+                     watched: (num(d["viewCount"]) ?? 0) > 0, directPart: playable ? (part?["key"] as? String) : nil,
+                     summary: (d["summary"] as? String) ?? "", thumb: d["thumb"] as? String)
     }
 
     static func str(_ v: Any?) -> String? {
@@ -209,6 +221,9 @@ final class PlexLibrary {
 final class MoviePlayer: ObservableObject {
     @Published var showing = false
     @Published private(set) var title = ""
+    @Published private(set) var year = ""
+    /// The title card shown for a few seconds when a movie starts.
+    @Published private(set) var showTitleCard = false
     let player = AVPlayer()
     var plex: PlexLibrary?
     /// The movie was paused because Jim said "Hey Mibo"; it resumes after Mibo answers.
@@ -254,6 +269,13 @@ final class MoviePlayer: ObservableObject {
                 plex.markWatched(m)
                 self.next()
             }.store(in: &watchers)
+        // The title (and summary and poster) for the Apple TV player's info panel.
+        item.externalMetadata = Self.metadata(m, poster: nil)
+        Task {
+            if let d = await plex.poster(m), self.current?.key == m.key {
+                item.externalMetadata = Self.metadata(m, poster: d)
+            }
+        }
         player.replaceCurrentItem(with: item)
         // Pick up where Jim left off, unless he finished it.
         if !m.watched && m.viewOffset > 60 && m.viewOffset < m.duration - 300 {
@@ -262,11 +284,31 @@ final class MoviePlayer: ObservableObject {
         player.play()
         autoPaused = false
         showing = true
+        year = m.year.map(String.init) ?? ""
+        showTitleCard = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7) { [weak self] in
+            if self?.current?.key == m.key { self?.showTitleCard = false }
+        }
         print("My Mibo TV: playing \(m.title) (\(triedDirect ? "file" : "Plex stream"))")
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.report() }
         }
+    }
+
+    private static func metadata(_ m: PlexLibrary.Movie, poster: Data?) -> [AVMetadataItem] {
+        func item(_ id: AVMetadataIdentifier, _ value: NSCopying & NSObjectProtocol) -> AVMetadataItem {
+            let i = AVMutableMetadataItem()
+            i.identifier = id
+            i.value = value
+            i.extendedLanguageTag = "und"
+            return i
+        }
+        var items = [item(.commonIdentifierTitle, m.title as NSString)]
+        if let y = m.year { items.append(item(.iTunesMetadataReleaseDate, String(y) as NSString)) }
+        if !m.summary.isEmpty { items.append(item(.commonIdentifierDescription, m.summary as NSString)) }
+        if let poster { items.append(item(.commonIdentifierArtwork, poster as NSData)) }
+        return items
     }
 
     private func report() {
@@ -293,6 +335,7 @@ final class MoviePlayer: ObservableObject {
         queue = []
         current = nil
         autoPaused = false
+        showTitleCard = false
         if showing { showing = false }
         title = ""
     }

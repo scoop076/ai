@@ -56,7 +56,28 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView(convo: convo) }
         // Plex movies play full-screen; Menu on the remote stops the movie.
         .fullScreenCover(isPresented: $movie.showing, onDismiss: { movie.close() }) {
-            MoviePlayerView(player: movie.player).ignoresSafeArea()
+            ZStack(alignment: .bottomLeading) {
+                MoviePlayerView(player: movie.player).ignoresSafeArea()
+                // The movie's name for a few seconds when it starts.
+                if movie.showTitleCard {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(movie.title)
+                            .font(.system(size: 64, weight: .bold))
+                        if !movie.year.isEmpty {
+                            Text(movie.year)
+                                .font(.system(size: 34, weight: .medium))
+                                .opacity(0.8)
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.8), radius: 12)
+                    .padding(.leading, 90)
+                    .padding(.bottom, 80)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeInOut(duration: 1), value: movie.showTitleCard)
         }
         .onAppear {
             // Keep the Apple screensaver away while My Mibo is open; Mibo dozes on its own instead.
