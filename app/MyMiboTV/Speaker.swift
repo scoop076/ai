@@ -86,7 +86,19 @@ final class Speaker: NSObject, ObservableObject {
     private func fetch(_ said: String) -> Task<Data?, Never>? {
         guard let server else { return nil }
         let v = voice
-        return Task { try? await server.speech(said, voice: v) }
+        // Try the Aura voice up to three times before the Apple TV's own voice steps in, so
+        // one slow or failed request doesn't change Mibo's voice in the middle of a story.
+        return Task {
+            for attempt in 1...3 {
+                do { return try await server.speech(said, voice: v) }
+                catch {
+                    if Task.isCancelled { return nil }
+                    print("My Mibo TV: Aura voice failed (try \(attempt) of 3): \(error.localizedDescription)")
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+            }
+            return nil
+        }
     }
 
     private func playNext() {
@@ -114,7 +126,8 @@ final class Speaker: NSObject, ObservableObject {
                 p.play()
                 self.startTicker(words: Self.words(c.shown).count)
             } else {
-                // The server's voice failed (for example, the free daily allowance ran out).
+                // The server's voice failed three times (for example, the Workers AI allowance ran out).
+                print("My Mibo TV: using the Apple TV voice for: \(c.shown.prefix(60))")
                 let u = AVSpeechUtterance(string: c.said)
                 u.rate = AVSpeechUtteranceDefaultSpeechRate * min(1.3, max(0.7, self.rate))
                 self.synth.speak(u)
