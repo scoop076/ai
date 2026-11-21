@@ -358,8 +358,11 @@ final class Conversation: ObservableObject {
 
     /// Whisper sometimes "hears" these in silence or TV noise.
     static func isNoise(_ text: String) -> Bool {
-        let t = text.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
-        return ["", "you", "thank you", "thanks for watching", "bye", "uh", "um", "hmm", "mibo", "collinsville"].contains(t)
+        let t = text.lowercased()
+            .replacingOccurrences(of: "[^a-z' ]", with: " ", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+        return ["", "you", "thank you", "thanks for watching", "thank you for watching", "bye", "uh", "um", "hmm",
+                "mibo", "collinsville", "mibo collinsville", "meebo", "hey mibo"].contains(t)
     }
 
     static func rules(screen: String, justWoken: Bool = false) -> String {

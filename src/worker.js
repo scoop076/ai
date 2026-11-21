@@ -508,8 +508,8 @@ export default {
           audio: btoa(bin),
           language: "en",
           vad_filter: true,
-          // Names Whisper should expect to hear.
-          initial_prompt: "Mibo, Collinsville.",
+          // No initial_prompt: Whisper repeats it back when it hears only noise
+          // (it kept "hearing" "Mibo, Collinsville.").
         });
         return json({ text: String((out && out.text) || "").trim() });
       } catch (e) {
