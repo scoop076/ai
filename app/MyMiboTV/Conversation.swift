@@ -21,6 +21,9 @@ final class Conversation: ObservableObject {
     @Published private(set) var dozing = false
     private var lastActive = Date()
     private let dozeAfter: TimeInterval = 10 * 60
+    /// After this long with nothing going on, My Mibo closes itself (back to the Apple TV's
+    /// home screen). "Hey Mibo" opens it again through Home Assistant.
+    private let closeAfter: TimeInterval = 5 * 60
     private var dozeTimer: Timer?
 
     let speaker = Speaker()
@@ -41,7 +44,7 @@ final class Conversation: ObservableObject {
     /// A conversation stays open (Mibo keeps listening) until Jim says "go quiet",
     /// or until nobody has talked for this long.
     @Published private var sessionUntil: Date?
-    private let sessionLength: TimeInterval = 5 * 60
+    private let sessionLength: TimeInterval = 60   // Jim's choice: quiet after a minute with no question
     private var inSession: Bool { (sessionUntil ?? .distantPast) > Date() }
     /// Quiet mode: show the "Say Hey Mibo" hint on the TV.
     var showWakeHint: Bool { state == .idle && sessionUntil == nil && speakerConnected && !needsSetup }
@@ -95,6 +98,17 @@ final class Conversation: ObservableObject {
     }
 
     /// Something happened: stay awake (and wake up if dozing).
+    /// Close My Mibo. Let go of the speaker first, so the next "Hey Mibo" knows the app
+    /// is closed and asks Home Assistant to open it. (Fine for Jim's own Apple TVs; an App
+    /// Store version would need another way, since apps aren't supposed to quit themselves.)
+    private func closeApp() {
+        print("My Mibo TV: nothing for \(Int(closeAfter / 60)) minutes; closing")
+        cancelTurn()
+        sessionUntil = nil
+        link?.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { exit(0) }
+    }
+
     func touch() {
         lastActive = Date()
         if dozing { dozing = false }
@@ -103,6 +117,7 @@ final class Conversation: ObservableObject {
     private func checkDoze() {
         if state != .idle || sessionUntil != nil || speaker.isSpeaking { lastActive = Date(); return }
         if !dozing && Date().timeIntervalSince(lastActive) > dozeAfter { dozing = true }
+        if Date().timeIntervalSince(lastActive) > closeAfter && !needsSetup { closeApp() }
     }
 
     func apply(_ s: TVSettings) {
