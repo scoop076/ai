@@ -295,6 +295,7 @@ final class Conversation: ObservableObject {
         if bargeMic && state == .speaking { hearOverMibo(pcm, raw: raw); return }
         guard state == .listening else { return }
         if Date() < ignoreAudioUntil { return }   // the tail of Mibo's voice, still coming out of the TV
+        if Date() < speaker.cueUntil { return }   // Mibo's hello is playing (Flux heard "What's up, home skillet" as words)
         recording.append(pcm)
         flux?.send(pcm)
         if let raw, hearingYou { jimRawLevels.append(BargeDetector.rms(raw)) }
