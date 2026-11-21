@@ -28,6 +28,9 @@ final class Speaker: NSObject, ObservableObject {
     // Short cues like "Yes?", fetched ahead of time so they play instantly.
     private var cueAudio: [String: Data] = [:]
     private var cuePlayer: AVAudioPlayer?
+    /// Until when a cue (hello, goodbye) is still coming out of the TV, so the app can ignore
+    /// the microphone meanwhile instead of hearing Mibo's own hello as Jim talking.
+    private(set) var cueUntil = Date.distantPast
 
     override init() {
         super.init()
@@ -109,6 +112,7 @@ final class Speaker: NSObject, ObservableObject {
             } else {
                 let u = AVSpeechUtterance(string: Self.forVoice(text))
                 u.rate = AVSpeechUtteranceDefaultSpeechRate * min(1.3, max(0.7, self.rate))
+                self.cueUntil = Date().addingTimeInterval(2.0)
                 self.synth.speak(u)
             }
         }
@@ -120,6 +124,8 @@ final class Speaker: NSObject, ObservableObject {
         p.rate = rate
         cuePlayer = p
         p.play()
+        // The clip's length, plus a little for the TV's own delay and the room's echo.
+        cueUntil = Date().addingTimeInterval(p.duration / Double(max(0.5, rate)) + 0.4)
     }
 
     // MARK: -
