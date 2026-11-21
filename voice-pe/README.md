@@ -21,6 +21,7 @@ follow-up. Saying "Hey Mibo" or "stop" while Mibo is talking interrupts.
 | `hey_mibo/` | The trained wake word, once it's made (`hey_mibo.json` + `hey_mibo.tflite`) |
 | `mibo-voice.yaml` | The Voice PE firmware (the official firmware with a few changes, each marked `MIBO:`) |
 | `mibo-voice-device.yaml` | The small file you paste into the ESPHome Device Builder; it pulls `mibo-voice.yaml` from GitHub and adds your Wi-Fi |
+| `ha-open-mibo.yaml` | The Home Assistant automation that opens My Mibo when you say "Hey Mibo" and it isn't open |
 | `../app/MyMiboTV.xcodeproj` | The Apple TV app |
 
 ## Setup, in order
