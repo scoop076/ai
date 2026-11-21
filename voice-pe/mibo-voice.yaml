@@ -9,6 +9,8 @@
 #   - The only wake word is "Hey Mibo" (plus the built-in "stop").
 #   - "Hey Mibo" while My Mibo isn't open asks Home Assistant (a webhook) to
 #     open it on the Apple TV, then starts listening once the app connects.
+#   - No wake chime while My Mibo is open (Mibo says "Yes?" instead); the chime
+#     only plays while the app is being opened.
 #
 # Your Wi-Fi is added by the small file you keep in the ESPHome Device Builder
 # (see mibo-voice-device.yaml), which pulls this one from GitHub.
@@ -1897,17 +1899,7 @@ micro_wake_word:
                                 then:
                                   - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
                                   - script.execute: control_leds
-                            - if:
-                                condition:
-                                  and:
-                                    - switch.is_on: wake_sound
-                                    - lambda: return !id(va).is_wake_word_audio_active();
-                                then:
-                                  - script.execute:
-                                      id: play_sound
-                                      priority: true
-                                      sound_file: "wake_word_triggered_sound"
-                                  - delay: 300ms
+                            # MIBO: no chime when My Mibo is open; Mibo answers "Yes?" itself.
                             - voice_assistant.start:
                                 wake_word: !lambda return wake_word;
 
@@ -1951,19 +1943,14 @@ voice_assistant:
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
-    # MIBO: the app just opened because you said "Hey Mibo": chime and listen,
-    # so you can ask your question without saying "Hey Mibo" again.
+    # MIBO: the app just opened because you said "Hey Mibo": listen right away (the
+    # app says "Yes?"), so you can ask without saying "Hey Mibo" again.
     - if:
         condition:
           lambda: return id(mibo_open_at) != 0 && millis() - id(mibo_open_at) < 30000;
         then:
           - lambda: id(mibo_open_at) = 0;
           - delay: 700ms
-          - script.execute:
-              id: play_sound
-              priority: true
-              sound_file: "wake_word_triggered_sound"
-          - delay: 300ms
           - voice_assistant.start:
   on_client_disconnected:
     - voice_assistant.stop:
