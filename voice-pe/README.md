@@ -21,6 +21,7 @@ follow-up. Saying "Hey Mibo" or "stop" while Mibo is talking interrupts.
 | `hey_mibo/` | The trained wake word, once it's made (`hey_mibo.json` + `hey_mibo.tflite`) |
 | `mibo-voice.yaml` | The Voice PE firmware (the official firmware with a few changes, each marked `MIBO:`) |
 | `mibo-voice-device.yaml` | The small file you paste into the ESPHome Device Builder; it pulls `mibo-voice.yaml` from GitHub and adds your Wi-Fi |
+| `ha-open-mibo.yaml` | The Home Assistant automation that opens My Mibo when you say "Hey Mibo" and it isn't open |
 | `../app/MyMiboTV.xcodeproj` | The Apple TV app |
 
 ## Setup, in order
@@ -68,6 +69,30 @@ To go back to the original firmware anytime: esphome.github.io/home-assistant-vo
 
 Press and hold the remote's click button for Settings. Click once to talk (it opens the Voice PE's
 microphone) or to stop Mibo talking. Play/Pause also stops Mibo.
+
+### 5. "Hey Mibo" opens My Mibo (Home Assistant)
+When My Mibo isn't open, the speaker can't send your voice anywhere, so it asks Home Assistant to open
+the app instead: it calls a webhook (`http://homeassistant.local/api/webhook/mibo-open-studio`), and an
+automation wakes the Apple TV and opens My Mibo. When the app connects, the speaker chimes and listens,
+so you say "Hey Mibo", wait for the second chime, then ask. The ring spins while the app opens; it
+flashes red if Home Assistant didn't answer.
+1. Add the **Studio** Apple TV to Home Assistant: Settings → Devices & services → Add Integration →
+   **Apple TV**, pick the Studio one, and type the codes the TV shows. (Only the Apple TV integration;
+   keep ignoring "Mibo Voice".)
+2. Add the automation in `ha-open-mibo.yaml` (instructions at its top) and fix the two entity names.
+3. Test it from the Mac's Terminal with My Mibo closed:
+   `curl -X POST http://homeassistant.local/api/webhook/mibo-open-studio`
+4. If the speaker can't find `homeassistant.local`, put Home Assistant's IP address in
+   `mibo-voice-device.yaml`:
+   ```yaml
+   substitutions:
+     mibo_ha_url: http://192.168.86.XX   # your Home Assistant address
+   ```
+The automation opens the app by its bundle ID (`com.liljimjim.mibotv`). If that ever fails, the app
+also answers the link `mibo://`: use `media_content_type: url`, `media_content_id: "mibo://open"`.
+
+My Mibo lets go of the speaker when you leave it (Home button or another app), so the next "Hey Mibo"
+opens it again. Free signing expires after 7 days; an expired app can't be opened this way either.
 
 ## Good to know
 - **Voice:** the built-in Kokoro voice engine (Google MediaPipe) only runs on iPhone and iPad, so the Apple TV

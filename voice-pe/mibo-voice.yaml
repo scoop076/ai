@@ -7,6 +7,8 @@
 #   - No API encryption, so the Apple TV app can connect.
 #   - A mibo_listen action, so the app can open the mic for follow-ups.
 #   - The only wake word is "Hey Mibo" (plus the built-in "stop").
+#   - "Hey Mibo" while My Mibo isn't open asks Home Assistant (a webhook) to
+#     open it on the Apple TV, then starts listening once the app connects.
 #
 # Your Wi-Fi is added by the small file you keep in the ESPHome Device Builder
 # (see mibo-voice-device.yaml), which pulls this one from GitHub.
@@ -14,6 +16,11 @@
 # To go back to stock, reinstall from esphome.github.io/home-assistant-voice-pe.
 
 substitutions:
+  # MIBO: when "Hey Mibo" is heard and My Mibo isn't open, the Voice PE calls
+  # this Home Assistant webhook, whose automation opens the app on the Apple TV.
+  # Override either one in mibo-voice-device.yaml (use HA's IP if .local fails).
+  mibo_ha_url: http://homeassistant.local
+  mibo_open_webhook: mibo-open-studio
   # Phases of the Voice Assistant
   # The voice assistant is ready to be triggered by a wake word
   voice_assist_idle_phase_id: '1'
@@ -100,6 +107,11 @@ wifi:
   fast_connect: ${hidden_ssid}
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
+    # MIBO: listen for "Hey Mibo" as soon as Wi-Fi is up, even with My Mibo
+    # closed, so the wake word can open the app.
+    - lambda: id(init_in_progress) = false;
+    - script.execute: apply_wake_word_sensitivity
+    - micro_wake_word.start:
     - script.execute: control_leds
     # Enable/disable Sendspin static adjustment delay if the jack is plugged in or not
     - if:
@@ -151,6 +163,11 @@ psram:
   ignore_not_found: false  # The VPE has PSRAM, so this is safe. Allows configuring WiFi driver to use more resources (done automatically by the speaker media player)
 
 globals:
+  # MIBO: when we asked Home Assistant to open My Mibo (millis), 0 = not waiting.
+  - id: mibo_open_at
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
   # Global index for our LEDs. So that switching between different animation does not lead to unwanted effects.
   - id: global_led_animation_index
     type: int
@@ -1086,6 +1103,44 @@ event:
       - easter_egg_press
 
 script:
+  # MIBO: "Hey Mibo" was heard but My Mibo isn't connected. Ask Home Assistant to
+  # turn on the Apple TV and open the app; when it connects, the voice assistant's
+  # on_client_connected starts listening (see below).
+  - id: mibo_open_app
+    mode: single
+    then:
+      - lambda: id(mibo_open_at) = millis();
+      - script.execute:
+          id: play_sound
+          priority: true
+          sound_file: "wake_word_triggered_sound"
+      - script.execute: control_leds
+      - http_request.post:
+          url: "${mibo_ha_url}/api/webhook/${mibo_open_webhook}"
+          request_headers:
+            Content-Type: application/json
+          body: '{"device": "mibo-voice"}'
+          on_response:
+            - logger.log:
+                format: "MIBO: asked Home Assistant to open My Mibo (HTTP %d)"
+                args: [response->status_code]
+          on_error:
+            - logger.log: "MIBO: couldn't reach Home Assistant to open My Mibo"
+            - lambda: id(mibo_open_at) = 0;
+      - if:
+          condition:
+            lambda: return id(mibo_open_at) == 0;
+          then:
+            # Home Assistant didn't answer: flash red for 3 seconds.
+            - script.execute: control_leds_no_ha_connection_state
+            - delay: 3s
+          else:
+            - wait_until:
+                condition:
+                  voice_assistant.connected:
+                timeout: 30s
+      - lambda: id(mibo_open_at) = 0;
+      - script.execute: control_leds
   # Master script controlling the LEDs, based on different conditions : initialization in progress, wifi and api connected and voice assistant phase.
   # For the sake of simplicity and re-usability, the script calls child scripts defined below.
   # This script will be called every time one of these conditions is changing.
@@ -1104,8 +1159,16 @@ script:
             id(control_leds_improv_ble_state).execute();
           } else if (id(init_in_progress)) {
             id(control_leds_init_state).execute();
-          } else if (!id(wifi_id).is_connected() || !id(api_id).is_connected()){
+          } else if (!id(wifi_id).is_connected()){
             id(control_leds_no_ha_connection_state).execute();
+          } else if (!id(api_id).is_connected()){
+            // MIBO: no app connected is normal now (My Mibo is closed). Spin while
+            // the app is being opened, otherwise stay dark and wait for "Hey Mibo".
+            if (id(mibo_open_at) != 0) {
+              id(control_leds_voice_assistant_thinking_phase).execute();
+            } else {
+              id(control_leds_voice_assistant_idle_phase).execute();
+            }
           } else if (id(center_button).state) {
             id(control_leds_center_button_touched).execute();
           } else if (id(jack_plugged_recently)) {
@@ -1741,6 +1804,12 @@ voice_kit:
     md5: 964635c5bf125529dab14a2472a15401
 
 # Sendspin related components are pinned to specific commits for reproducible builds
+# MIBO: used to call the Home Assistant webhook that opens My Mibo.
+http_request:
+  id: http_client
+  verify_ssl: false
+  timeout: 5s
+
 external_components:
   - source:
       type: git
@@ -1780,10 +1849,22 @@ micro_wake_word:
       internal: true
   vad:
   on_wake_word_detected:
+    # MIBO: My Mibo isn't open: ask Home Assistant to open it (only for "Hey Mibo").
+    - if:
+        condition:
+          and:
+            - switch.is_off: master_mute_switch
+            - not:
+                voice_assistant.connected:
+            - lambda: return wake_word != "stop" && wake_word != "Stop";
+        then:
+          - script.execute: mibo_open_app
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
-          switch.is_off: master_mute_switch
+          and:
+            - switch.is_off: master_mute_switch
+            - voice_assistant.connected:
         then:
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
@@ -1870,6 +1951,20 @@ voice_assistant:
     - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
+    # MIBO: the app just opened because you said "Hey Mibo": chime and listen,
+    # so you can ask your question without saying "Hey Mibo" again.
+    - if:
+        condition:
+          lambda: return id(mibo_open_at) != 0 && millis() - id(mibo_open_at) < 30000;
+        then:
+          - lambda: id(mibo_open_at) = 0;
+          - delay: 700ms
+          - script.execute:
+              id: play_sound
+              priority: true
+              sound_file: "wake_word_triggered_sound"
+          - delay: 300ms
+          - voice_assistant.start:
   on_client_disconnected:
     - voice_assistant.stop:
     - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};

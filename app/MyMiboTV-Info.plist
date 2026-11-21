@@ -4,6 +4,17 @@
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>My Mibo talks to the Mibo Voice speaker on your home network, which listens for "Hey Mibo".</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.liljimjim.mibotv</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mibo</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_esphomelib._tcp</string>

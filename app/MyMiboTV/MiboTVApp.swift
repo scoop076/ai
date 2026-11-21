@@ -59,7 +59,8 @@ struct ContentView: View {
             if convo.needsSetup { showSettings = true }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; convo.touch() }
+            if phase == .active { UIApplication.shared.isIdleTimerDisabled = true; convo.touch(); convo.onScreen(true) }
+            if phase == .background { convo.onScreen(false) }
         }
         .onChange(of: convo.needsSetup) { _, now in if now { showSettings = true } }
     }

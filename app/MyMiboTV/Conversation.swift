@@ -288,6 +288,19 @@ final class Conversation: ObservableObject {
 
     private func endRun() { link?.event(.runEnd) }
 
+    /// My Mibo left the screen (Home button, another app) or came back. Let go of
+    /// the speaker while we're away, so "Hey Mibo" knows the app isn't open and
+    /// asks Home Assistant to open it again. Reconnect when we're back.
+    func onScreen(_ on: Bool) {
+        if on {
+            link?.start()
+        } else {
+            cancelTurn()
+            sessionUntil = nil
+            link?.stop()
+        }
+    }
+
     /// Stop whatever Mibo is doing (the remote's button, or the speaker said stop).
     private func cancelTurn(endRun end: Bool = true) {
         turn += 1
