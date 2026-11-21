@@ -1532,11 +1532,11 @@ script:
       - lambda: |-
           const StringRef sensitivity = id(wake_word_sensitivity).current_option();
           if (sensitivity == "Slightly sensitive") {
-            id(hey_mibo).set_probability_cutoff(235);     // 0.92
+            id(hey_mibo).set_probability_cutoff(242);     // 0.95
           } else if (sensitivity == "Moderately sensitive") {
-            id(hey_mibo).set_probability_cutoff(217);     // 0.85
+            id(hey_mibo).set_probability_cutoff(227);     // 0.89, no false wake-ups in training's noise test
           } else if (sensitivity == "Very sensitive") {
-            id(hey_mibo).set_probability_cutoff(191);     // 0.75
+            id(hey_mibo).set_probability_cutoff(204);     // 0.80
           }
 
   # Script used activate the stop word if the TTS step is long.
