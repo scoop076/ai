@@ -12,13 +12,6 @@ final class Conversation: ObservableObject {
     @Published private(set) var micLevel = 0.0
     /// True once Mibo has noticed Jim talking in this turn.
     @Published private(set) var hearingYou = false
-    /// A short line under the face so Jim can tell what Mibo is doing.
-    var statusLine: String {
-        switch state {
-        case .listening: return hearingYou ? "Hearing you\u{2026}" : "Listening\u{2026}"
-        default: return ""
-        }
-    }
     @Published private(set) var note = ""            // short status line, e.g. "Mibo Voice connected"
     @Published private(set) var speakerConnected = false
     @Published private(set) var accessory: String?   // the current personality's accessory
