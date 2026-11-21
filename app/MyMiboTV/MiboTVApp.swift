@@ -7,7 +7,7 @@ struct MiboTVApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(convo: convo, speaker: convo.speaker)
+            ContentView(convo: convo, speaker: convo.speaker, movie: convo.movie)
         }
     }
 }
@@ -15,6 +15,7 @@ struct MiboTVApp: App {
 struct ContentView: View {
     @ObservedObject var convo: Conversation
     @ObservedObject var speaker: Speaker
+    @ObservedObject var movie: MoviePlayer
     @State private var showSettings = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -53,6 +54,10 @@ struct ContentView: View {
         }
         .onPlayPauseCommand { convo.remoteStop() }
         .sheet(isPresented: $showSettings) { SettingsView(convo: convo) }
+        // Plex movies play full-screen; Menu on the remote stops the movie.
+        .fullScreenCover(isPresented: $movie.showing, onDismiss: { movie.close() }) {
+            MoviePlayerView(player: movie.player).ignoresSafeArea()
+        }
         .onAppear {
             // Keep the Apple screensaver away while My Mibo is open; Mibo dozes on its own instead.
             UIApplication.shared.isIdleTimerDisabled = true

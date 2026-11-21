@@ -111,6 +111,17 @@ you keep talking it's thrown away and never saved. If live words fail, the app f
 10 minutes. The Xcode console shows "probably done: …", "using the early answer" and "you finished talking
 (live words)".
 
+### Movies from Plex
+My Mibo plays Jim's Plex movies itself (the Plex app on Apple TV can't be controlled from outside: no
+"Advertise as player", and it ignores deep links). On launch it reads the movie libraries and collections from
+the Plex server on the Office Mac (`http://192.168.86.45:32400`; the server allows the home network without
+sign-in: Settings > Network > "allowed without auth" = `192.168.86.0/24`). Claude starts its reply with a command
+like `[play collection="Action/Adventure" shuffle]` or `[play movie="Jaws"]`, says a short confirmation, and the
+movie plays full-screen: the file itself if it's mp4 + H.264, otherwise an HLS stream the Plex server converts.
+Progress goes back to Plex (Continue Watching), finished movies are marked watched, and a shuffled collection
+keeps going with the next random movie. "Hey Mibo" pauses the movie; it carries on after Mibo answers unless Jim
+said pause or stop (`[movie pause|resume|stop|forward N|back N|restart|next]`). Menu on the remote stops it.
+
 ## Good to know
 - **Voice:** the built-in Kokoro voice engine (Google MediaPipe) only runs on iPhone and iPad, so the Apple TV
   speaks with the free Cloudflare Aura voices (each personality has one). If the daily free allowance runs out,
