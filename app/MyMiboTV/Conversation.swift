@@ -105,8 +105,17 @@ final class Conversation: ObservableObject {
     /// Close My Mibo. Let go of the speaker first, so the next "Hey Mibo" knows the app
     /// is closed and asks Home Assistant to open it. (Fine for Jim's own Apple TVs; an App
     /// Store version would need another way, since apps aren't supposed to quit themselves.)
+    /// "Go away": a quick "Bye!", then close the app.
+    private func sayByeAndClose() {
+        speaker.stop()
+        sessionUntil = nil
+        endRun(); state = .idle
+        speaker.cue("Bye!")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.closeApp() }
+    }
+
     private func closeApp() {
-        print("My Mibo TV: nothing for \(Int(closeAfter / 60)) minutes; closing")
+        print("My Mibo TV: closing")
         cancelTurn()
         sessionUntil = nil
         link?.stop()
@@ -175,6 +184,7 @@ final class Conversation: ObservableObject {
         persona = id
         speaker.voice = id == "claude" ? defaultVoice : (personaVoices[id] ?? defaultVoice)
         speaker.prepareCue("Yes?")
+        speaker.prepareCue("Bye!")
         accessory = id == "claude" ? nil : personaLooks[id]
     }
 
@@ -341,6 +351,13 @@ final class Conversation: ObservableObject {
                 keepListening()
                 return
             }
+            if Self.isCloseCommand(text) {
+                if useEarly { head?.cancel() }
+                youText = text
+                print("My Mibo TV: going away: \(text)")
+                sayByeAndClose()
+                return
+            }
             if Self.isSleepCommand(text) {
                 if useEarly { head?.cancel() }
                 youText = text
@@ -390,6 +407,12 @@ final class Conversation: ObservableObject {
                 }
             }
             guard my == turn else { return }
+            if Self.isCloseSignal(full) {
+                print("My Mibo TV: going away (Claude's call): \(text)")
+                youText = text
+                sayByeAndClose()
+                return
+            }
             if Self.isSleepSignal(full) {
                 // Claude worked out that Jim wants quiet mode (the words may have come through
                 // garbled, like "Go, sir" for "go silent").
@@ -487,7 +510,7 @@ final class Conversation: ObservableObject {
             let heard = withoutOwnYes(heard0)
             let text = wasInterrupted ? Self.dropOwnLead(heard, interruptedReply) : heard
             // Jim has probably finished: start Mibo's answer now, but hold it.
-            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text), !Self.isJustTheName(text),
+            guard hearingYou, let server, !text.isEmpty, !Self.isNoise(text), !Self.isSleepCommand(text), !Self.isCloseCommand(text), !Self.isJustTheName(text),
                   !(wasInterrupted && Self.isOwnWords(text, interruptedReply)) else { return }
             if let early, Self.sameWords(early.text, text) { return }
             early?.cancel()
@@ -760,8 +783,18 @@ final class Conversation: ObservableObject {
     }
     static func mayBeQuietSignal(_ s: String) -> Bool {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return t.isEmpty || (t.count < 7 && ("[quiet]".hasPrefix(t) || "[sleep]".hasPrefix(t)))
-            || t.hasPrefix("[quiet") || t.hasPrefix("[sleep")
+        return t.isEmpty || (t.count < 7 && ("[quiet]".hasPrefix(t) || "[sleep]".hasPrefix(t) || "[close]".hasPrefix(t)))
+            || t.hasPrefix("[quiet") || t.hasPrefix("[sleep") || t.hasPrefix("[close")
+    }
+    /// "Go away" and friends: close the app.
+    static func isCloseCommand(_ text: String) -> Bool {
+        let t = text.lowercased().replacingOccurrences(of: "[^a-z\\s']", with: " ", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+        guard !t.isEmpty, t.split(separator: " ").count <= 8 else { return false }
+        return t.range(of: "\\b(go away|close (the app|yourself|my mibo|up)|get lost|you can go( now)?|scram|be gone|shut (it )?down|turn (yourself )?off)\\b", options: .regularExpression) != nil
+    }
+    static func isCloseSignal(_ s: String) -> Bool {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("[close")
     }
     /// Claude answers "[sleep]" when Jim wants Mibo to go quiet.
     static func isSleepSignal(_ s: String) -> Bool {
@@ -796,6 +829,7 @@ final class Conversation: ObservableObject {
             "When it fits naturally, you may end with a short question to keep the conversation going.",
             "Speech-to-text often mishears your name Mibo as Miguel, Meebo, Mabel or Nibo; treat those as your name.",
             "If Jim wants you to go quiet, stop listening, or leave him alone (go silent, go quiet, go to sleep, that's all, never mind, and so on), reply with exactly [sleep] and nothing else. Speech-to-text often garbles this, so treat things like \"go, sir\", \"you're silent\" or \"go quite\" the same way.",
+            "If Jim wants you to go away entirely (go away, close the app, get lost, turn yourself off), reply with exactly [close] and nothing else; the app will say bye and close.",
             "In a conversation with you, a clear request or question (like \"tell me a story\" or \"what's a music box?\") is for you, even without your name; answer it.",
             "You are listening in a room where Jim is often with other people. Only answer when you're being talked to: Jim says your name, asks you something, or is clearly continuing his conversation with you. If what you heard is people talking to each other, the TV, background noise, or anything not meant for you, reply with exactly [quiet] and nothing else. Never interject into other people's conversations. When unsure, reply [quiet].",
             "Never end a sentence with Jim's name; he has asked you many times to stop. Use his name only at the start of a sentence, or leave it out entirely.",
