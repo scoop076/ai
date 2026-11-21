@@ -469,7 +469,7 @@ final class Conversation: ObservableObject {
 
     private func hearOverMibo(_ pcm: Data) {
         preroll.append(pcm)
-        let keep = 16000 * 2 * 4 / 10           // 0.4 s
+        let keep = 16000 * 2 * 3                // the last 3 s
         if preroll.count > keep { preroll.removeFirst(preroll.count - keep) }
         if barge.feed(pcm, miboAudible: speaker.isSpeaking) { talkedOver() }
     }
@@ -487,7 +487,12 @@ final class Conversation: ObservableObject {
         expectingFollowUp = false
         sessionUntil = Date().addingTimeInterval(sessionLength)
         vad = VoiceDetector(waitForSpeech: 20, talkingAt: barge.lastLevel, floor: roomFloor)
-        recording = preroll; preroll = Data()
+        // Keep Jim's words from when he started (plus a quarter second), not just the moment
+        // Mibo noticed, so the whole question reaches the speech-to-text.
+        let back = min(3.0, barge.secondsSinceJimStarted() + 0.25)
+        let bytes = min(preroll.count, Int(back * 16000) * 2)
+        recording = Data(preroll.suffix(bytes)); preroll = Data()
+        print("My Mibo TV: kept \(String(format: "%.1f", back)) s from before Mibo stopped")
         startFlux()
         flux?.send(recording)
         youText = ""
@@ -636,7 +641,7 @@ final class Conversation: ObservableObject {
         ].joined(separator: " ") + (justWoken
             ? " Jim just said \"Hey Mibo\", so this message is for you: answer it (never reply [quiet] to it)."
             : "") + (interrupted
-            ? " Someone just talked over you while you were answering, so you stopped partway and only the beginning of your last reply was heard. If it was Jim talking to you, respond to what he said (keep it short). If it was someone else, or not meant for you, reply [quiet] and stay stopped; don't resume the old answer unless Jim asks."
+            ? " Jim just talked over you while you were answering, so you stopped partway and he heard only the beginning of your last reply. What he said reached you mixed with your own voice from the TV, so the words may include bits of your own reply or be garbled: ignore any of your own words, and work out what he asked (for example a question about something in your story). Answer it briefly. If you truly can't tell what he said, ask in a few words, like \"Sorry, what was that?\" Reply [quiet] only if it's clearly someone else talking to another person. Don't resume the old answer unless Jim asks."
             : "")
     }
 }
@@ -796,12 +801,17 @@ struct BargeDetector {
     static let ratio = 1.7
     /// Never interrupt for anything quieter than this (room noise is about 250-2,000).
     static let minimum = 9000.0
-    static let needTime = 0.25
+    /// Speech goes up and down between syllables, so Jim counts once he's been above the
+    /// bar for 0.15 s in total within the last 0.6 s (Nov 21: the old "0.25 s straight"
+    /// took several seconds, so his question was mostly over before Mibo stopped).
+    static let needTime = 0.15
+    static let needWindow = 0.6
 
     private let echo: Double             // Mibo's voice level learned from earlier replies
     private var recent: [Double] = []    // levels over the last few seconds
     private var audible: [Double] = []   // levels while Mibo's audio was playing
-    private var loud = 0.0
+    private var aboveRecent: [Bool] = []  // was each recent piece above the bar?
+    private var levelsBack: [Double] = [] // levels of the last 3 s, for finding when Jim started
     private var logIn = 1.0
     private var secondPeak = 0.0
     private(set) var lastLevel = 0.0
@@ -833,7 +843,13 @@ struct BargeDetector {
         let windowLevel = recent.count > lag + 5 ? Self.percentile(Array(recent.dropLast(lag)), 0.5) : 0
         miboNow = max(echo, min(windowLevel, echo * 1.4))
         needed = max(Self.minimum, Self.ratio * miboNow)
-        loud = rms > needed ? loud + dt : max(0, loud - dt)
+        aboveRecent.append(rms > needed)
+        let w = max(1, Int(Self.needWindow / dt))
+        if aboveRecent.count > w { aboveRecent.removeFirst(aboveRecent.count - w) }
+        let loud = Double(aboveRecent.filter { $0 }.count) * dt
+        levelsBack.append(rms)
+        if levelsBack.count > window { levelsBack.removeFirst(levelsBack.count - window) }
+        chunkTime = dt
         if miboAudible && rms < needed {
             audible.append(rms)                    // learn Mibo's level from Mibo, not from Jim
             if audible.count > 6000 { audible.removeFirst(2000) }
@@ -846,6 +862,22 @@ struct BargeDetector {
             secondPeak = 0
         }
         return loud >= Self.needTime
+    }
+
+    private var chunkTime = 0.032
+    /// How many seconds ago Jim started talking: walk back while his voice (well above
+    /// Mibo's) keeps showing up, allowing pauses of up to 0.8 s between words.
+    func secondsSinceJimStarted() -> Double {
+        let onset = max(Self.minimum * 0.7, needed * 0.75)
+        let maxGap = Int(0.8 / chunkTime)
+        var start = levelsBack.count - 1
+        var gap = 0
+        var i = levelsBack.count - 1
+        while i >= 0 {
+            if levelsBack[i] > onset { start = i; gap = 0 } else { gap += 1; if gap > maxGap { break } }
+            i -= 1
+        }
+        return Double(levelsBack.count - start) * chunkTime
     }
 
     /// Mibo's typical voice level at the speaker during this reply, if there was enough of it.
